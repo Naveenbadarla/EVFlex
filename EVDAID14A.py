@@ -454,59 +454,72 @@ if page == "EV Optimizer":
 
     st.altair_chart(cost_chart, use_container_width=True)
         # ============================================================
-    # SIMPLE CHARGING PATTERN (ONLY ONE CHART)
+    # SIMPLE & CORRECT CHARGING PATTERN VISUALISATION
     # ============================================================
 
     st.subheader("🔌 Charging Pattern (Arrival → Departure Window)")
 
-    # Build window hours (may wrap over midnight)
-    start = arrival_hour
-    end = departure_hour if departure_hour > arrival_hour else departure_hour + 24
+    # Build correct chronological window (handles midnight wrap)
+    if arrival_hour <= departure_hour:
+        hours_window = list(range(arrival_hour, departure_hour))
+    else:
+        hours_window = list(range(arrival_hour, 24)) + list(range(0, departure_hour))
 
-    hours_window = list(range(start, end))
-    hours_mod = [h % 24 for h in hours_window]  # for display
+    # Preserve exact correct order
+    hours_mod = hours_window[:]  # copy for chart sorting
 
+    # Build visualisation DataFrame
     charging_pattern_df = pd.DataFrame({
         "Hour": hours_mod,
-        "Baseline (kWh)": [charge_baseline[h % 24] for h in hours_window],
-        "DA-indexed (kWh)": [charge_da_indexed[h % 24] for h in hours_window],
-        "Smart DA (kWh)": [charge_smart_da[h % 24] for h in hours_window],
-        "Smart DA+ID (kWh)": [charge_smart_full[h % 24] for h in hours_window],
+        "Baseline (kWh)": [charge_baseline[h] for h in hours_mod],
+        "DA-indexed (kWh)": [charge_da_indexed[h] for h in hours_mod],
+        "Smart DA (kWh)": [charge_smart_da[h] for h in hours_mod],
+        "Smart DA+ID (kWh)": [charge_smart_full[h] for h in hours_mod],
     })
 
+    # Reshape long format
     charging_long = charging_pattern_df.melt(
-        "Hour",
+        id_vars="Hour",
         var_name="Scenario",
         value_name="kWh"
     )
 
+    # 🌟 GROUPED BAR CHART — one panel per scenario (super clear)
     charging_chart = (
         alt.Chart(charging_long)
         .mark_bar()
         .encode(
-            x=alt.X("Hour:O", title="Hour of Day"),
-            y=alt.Y("kWh:Q", title="Charging (kWh)"),
+            x=alt.X(
+                "Hour:O",
+                title="Hour of Day",
+                sort=hours_mod   # 🟦 Force correct hour order
+            ),
+            y=alt.Y("kWh:Q", title="kWh charged"),
             color="Scenario:N",
+            column=alt.Column(
+                "Scenario:N",
+                header=alt.Header(labelAngle=0, labelFontSize=12)
+            ),
             tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")]
         )
-        .properties(height=350)
+        .properties(height=300)
     )
 
     st.altair_chart(charging_chart, use_container_width=True)
 
     st.markdown(
         """
-        **How to interpret this:**
+        ### How to read this chart
 
-        - Only hours between arrival and departure are shown.
-        - Each scenario distributes the required energy differently:
-            - Baseline → equal or early charging (flat price)
-            - DA-indexed → same pattern as baseline
-            - Smart DA → shifts charging into lowest DA-price hours
-            - Smart DA+ID → shifts charging even more into DA+ID dips
+        - Each panel shows **one scenario**.
+        - Bars represent **how much energy the EV charges** in each allowed hour.
+        - Hours are displayed correctly from **arrival → next-day departure**.
+        - Smart charging scenarios shift into the **cheapest hours**.
+        - DA-indexed tariff uses **flat pattern** (like baseline) — because retail DA-indexed does not influence the physical pattern.
         """
     )
-    # ============================================================
+
+# ============================================================
 # PRICE MANAGER PAGE
 # ============================================================
 
