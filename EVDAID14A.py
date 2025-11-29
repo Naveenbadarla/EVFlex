@@ -1004,6 +1004,36 @@ if page == "Price Manager (15-min)":
     else:
         for f in files:
             st.write(f"• `{f.name}`")
+    # ============================================================
+    # DELETE FILES UI
+    # ============================================================
+
+    st.subheader("🗑️ Delete files from /data")
+
+    delete_mode = st.checkbox("Enable delete mode")
+
+    if delete_mode:
+
+        st.warning("Delete mode is enabled. Be careful — deleted files cannot be recovered.")
+
+        data_files = sorted(DATA_DIR.glob("*.csv"))
+
+        if not data_files:
+            st.info("No files available to delete.")
+        else:
+            for f in data_files:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"**{f.name}**")
+                with col2:
+                    if st.button("Delete", key=f"del_{f.name}"):
+                        try:
+                            f.unlink()
+                            st.success(f"Deleted: {f.name}")
+                        except Exception as e:
+                            st.error(f"Failed to delete {f.name}: {e}")
+
+            st.info("Refresh the page to update the file list after deleting.")
 
 # ============================================================
 # FOOTER (APPEARS ON EVERY PAGE)
