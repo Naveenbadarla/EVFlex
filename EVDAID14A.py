@@ -826,6 +826,44 @@ if page == "EV Optimizer (15-min)":
             "Later arrivals typically reduce flexibility and increase cost._"
         )
 
+        # ============================================================
+        # VISUAL 3: Histogram of Simulated Arrival SOC (if SOC mode)
+        # ============================================================
+
+        if energy_method == "SOC-based charging" and battery_capacity is not None:
+
+            st.subheader("🔋 Distribution of Simulated Arrival SOC")
+
+            soc_values_list = []
+
+            # Regenerate random SOC values without recomputing costs
+            for _ in range(n_sim):
+                if soc_jitter > 0:
+                    arr_soc_i = arrival_soc + rng.normal(0, soc_jitter / 2.0)
+                    arr_soc_i = float(np.clip(arr_soc_i, 0, target_soc))
+                else:
+                    arr_soc_i = float(arrival_soc)
+
+                soc_values_list.append(arr_soc_i)
+
+            soc_df = pd.DataFrame({"ArrivalSOC": soc_values_list})
+
+            soc_hist = (
+                alt.Chart(soc_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("ArrivalSOC:Q", bin=alt.Bin(maxbins=20), title="Arrival SOC (%)"),
+                    y=alt.Y("count()", title="Frequency")
+                )
+                .properties(height=200)
+            )
+
+            st.altair_chart(soc_hist, use_container_width=True)
+
+            st.markdown(
+                "_This histogram shows how much arrival SOC varies when jitter is applied. "
+                "Lower arrival SOC → more required charging → potentially higher costs._"
+            )
 
 # ============================================================
 # PRICE MANAGER PAGE (15-MIN CLEANER VERSION)
