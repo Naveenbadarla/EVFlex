@@ -18,8 +18,8 @@ DATA_DIR.mkdir(exist_ok=True)
 
 def load_price_15min(source) -> pd.Series:
     """
-    Load a 'datetime, price_eur_mwh' CSV and return a cleaned 15-min series
-    indexed by datetime with values in €/kWh.
+    Load a raw CSV: detect datetime + price columns; convert €/MWh → €/kWh;
+    return a cleaned 15-minute price series indexed by datetime.
     """
     df = pd.read_csv(source)
 
@@ -30,22 +30,22 @@ def load_price_15min(source) -> pd.Series:
             dt_col = c
             break
     if dt_col is None:
-        raise ValueError("No datetime column found.")
+        raise ValueError("No datetime column found in uploaded file.")
 
-    # Detect price column
+    # Detect price column (€/MWh)
     price_col = None
     for c in df.columns:
-        if ("MWh" in c) or ("price" in c.lower()):
+        if ("price" in c.lower()) or ("MWh" in c):
             price_col = c
             break
     if price_col is None:
         raise ValueError("No price column found.")
 
-    # Clean datetime (handle ENTSO-E MTU)
+    # Clean datetime
     try:
-        dt_clean = df[dt_col].astype(str).split("-").str[0].str.strip()
+        dt_clean = df[dt_col].astype(str).str.split("-").str[0].str.strip()
         df["datetime"] = pd.to_datetime(dt_clean)
-    except Exception:
+    except:
         df["datetime"] = pd.to_datetime(df[dt_col], errors="coerce")
 
     # Convert €/MWh → €/kWh
@@ -53,23 +53,26 @@ def load_price_15min(source) -> pd.Series:
     df = df.dropna(subset=["datetime", "price_eur_mwh"])
     df["price_eur_kwh"] = df["price_eur_mwh"] / 1000.0
 
-    # Resample to exactly 15 minutes
-    s = df.set_index("datetime")["price_eur_kwh"].resample("15min").mean()
-    return s.dropna()
+    # Resample to EXACT 15-minute resolution
+    s15 = (
+        df.set_index("datetime")["price_eur_kwh"]
+        .resample("15min")
+        .mean()
+    ).dropna()
+
+    return s15
 
 
 def series_to_96_slots(series_15min: pd.Series) -> np.ndarray:
-    """
-    Extract exactly 96 quarter-hours from the first full day of data.
-    """
+    """Extract first 96 quarter-hours (1 day)."""
     if len(series_15min) < 96:
-        raise ValueError("Series must contain at least 96 quarter-hours.")
-    return series_15min.iloc[:96].values  # (96,)
+        raise ValueError("Price series must contain at least 96 quarter-hours.")
+    return series_15min.iloc[:96].values
 
 
 def synthetic_da_id_profiles_96():
     """
-    Synthetic fallback: repeat the hourly DA/ID x4 to produce 96 slots.
+    Synthetic fallback: 24-hour DA & ID → repeat each hour ×4 to produce 96 slots.
     """
     da = np.array([
         0.28, 0.25, 0.22, 0.19, 0.17, 0.15, 0.14, 0.15,
@@ -79,15 +82,11 @@ def synthetic_da_id_profiles_96():
     id_prices = da - np.clip(da - da.min(), 0, 0.03)
     id_prices = np.maximum(id_prices, 0.0)
 
-    da_96 = np.repeat(da, 4)
-    id_96 = np.repeat(id_prices, 4)
-    return da_96, id_96
+    return np.repeat(da, 4), np.repeat(id_prices, 4)
 
 
 def get_da_id_profiles_96(price_source, year, da_file, id_file):
-    """
-    Returns (da_96, id_96) in €/kWh (length 96 each).
-    """
+    """Return (da_96, id_96) based on user selection."""
     if price_source == "Synthetic example":
         return synthetic_da_id_profiles_96()
 
@@ -95,7 +94,7 @@ def get_da_id_profiles_96(price_source, year, da_file, id_file):
         da_path = DATA_DIR / f"da_{year}.csv"
         id_path = DATA_DIR / f"id_{year}.csv"
         if not da_path.exists() or not id_path.exists():
-            st.warning("Missing DA/ID files → using synthetic 96-slot prices.")
+            st.warning("Missing DA/ID files → using synthetic prices.")
             return synthetic_da_id_profiles_96()
         da_series = load_price_15min(da_path)
         id_series = load_price_15min(id_path)
@@ -103,7 +102,7 @@ def get_da_id_profiles_96(price_source, year, da_file, id_file):
 
     if price_source == "Upload DA+ID CSVs":
         if da_file is None or id_file is None:
-            st.warning("Upload both DA and ID CSV or change source.")
+            st.warning("Please upload both DA & ID files or use another source.")
             return synthetic_da_id_profiles_96()
         da_series = load_price_15min(da_file)
         id_series = load_price_15min(id_file)
@@ -111,13 +110,13 @@ def get_da_id_profiles_96(price_source, year, da_file, id_file):
 
     return synthetic_da_id_profiles_96()
     # ============================================================
-# EV OPTIMISATION UTILITIES (15-MIN SLOTS)
+# EV OPTIMISATION UTILITIES (15-MIN / 96 SLOTS)
 # ============================================================
 
 def allowed_slots_96(arrival_hour: int, departure_hour: int) -> np.ndarray:
     """
-    Boolean array (length 96) indicating when the EV is connected.
-    Slots:
+    Returns a 96-length boolean vector where True means the EV is plugged in.
+    Slot numbering:
         0   = 00:00–00:15
         1   = 00:15–00:30
         ...
@@ -131,7 +130,7 @@ def allowed_slots_96(arrival_hour: int, departure_hour: int) -> np.ndarray:
         if start <= end:
             allowed[s] = (start <= s < end)
         else:
-            # Window wraps past midnight
+            # Wraps across midnight
             allowed[s] = (s >= start or s < end)
 
     return allowed
@@ -142,17 +141,18 @@ def optimise_charging_96(cost_curve_96: np.ndarray,
                          session_kwh: float,
                          charger_power: float) -> np.ndarray:
     """
-    Greedy cheapest-slot optimisation for a single day at 15-min resolution.
-    cost_curve_96: €/kWh for each slot (0..95).
+    Greedy cheapest-slot optimisation at 15-min resolution.
+    cost_curve_96: €/kWh (length 96)
+    allowed_96: boolean (length 96)
     """
     if session_kwh <= 0:
         return np.zeros(96)
 
     charge = np.zeros(96)
     remaining = session_kwh
-    slot_energy = charger_power * 0.25  # kWh per 15-min slot
+    slot_energy = charger_power * 0.25  # 15 min = 0.25 hour
 
-    # Cheapest allowed slots first
+    # Sort allowed slots by cheapest price
     cheap_slots = sorted(
         [s for s in range(96) if allowed_96[s]],
         key=lambda s: cost_curve_96[s]
@@ -168,9 +168,7 @@ def optimise_charging_96(cost_curve_96: np.ndarray,
 
 
 def session_cost_96(charge_96: np.ndarray, retail_curve_96: np.ndarray) -> float:
-    """
-    Cost = Σ (charge[s] * retail_price[s]) over 96 slots.
-    """
+    """Cost per session = Σ(slot_kWh × retail_price)."""
     return float(np.sum(charge_96 * retail_curve_96))
 
 
@@ -179,27 +177,32 @@ def session_cost_96(charge_96: np.ndarray, retail_curve_96: np.ndarray) -> float
 # ============================================================
 
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Select page", ["EV Optimizer (15-min)", "Price Manager"])
+page = st.sidebar.radio(
+    "Select page",
+    ["EV Optimizer (15-min)", "Price Manager (15-min)"]
+)
 
 
 # ============================================================
-# EV OPTIMIZER PAGE (15-MIN ENGINE)
+# EV OPTIMIZER PAGE (15-min ENGINE)
 # ============================================================
 
 if page == "EV Optimizer (15-min)":
 
-    st.sidebar.title("🚗 EV Optimizer (15-min precision)")
+    st.sidebar.title("🚗 EV Optimizer (15-min resolution)")
 
-    # -----------------------------
-    # BASIC EV PARAMETERS
-    # -----------------------------
+    # -------------------------------------------
+    # Charger power
+    # -------------------------------------------
     charger_power = st.sidebar.number_input(
         "Charger power (kW)",
         min_value=1.0, max_value=22.0,
         value=11.0, step=1.0
     )
 
-    # Charging frequency (sessions/year)
+    # -------------------------------------------
+    # Charging frequency
+    # -------------------------------------------
     freq_choice = st.sidebar.selectbox(
         "Charging frequency",
         [
@@ -226,30 +229,42 @@ if page == "EV Optimizer (15-min)":
     else:
         sessions_per_year = custom_days * 52
 
-    # Arrival / departure window (whole hours)
+    # -------------------------------------------
+    # Arrival / Departure Window
+    # -------------------------------------------
     arrival_hour = st.sidebar.slider("Arrival hour", 0, 23, 18)
     departure_hour = st.sidebar.slider("Departure hour", 0, 23, 7)
 
+    # -------------------------------------------
     # Baseline flat retail price
+    # -------------------------------------------
     energy_flat = st.sidebar.number_input(
         "Flat retail price (€/kWh)",
         min_value=0.01, max_value=1.00,
-        value=0.30, step=0.01,
-        help="Price you pay in a standard flat tariff."
+        value=0.30, step=0.01
     )
 
-    # -----------------------------
-    # CHARGING ENERGY METHOD (SOC vs kWh/session)
-    # -----------------------------
+    # -------------------------------------------
+    # Charging energy method
+    # -------------------------------------------
     st.sidebar.markdown("### Charging energy method")
 
     energy_method = st.sidebar.radio(
-        "How to define charged energy per session?",
+        "How to define energy per session?",
         ["SOC-based charging", "Manual kWh per session"]
     )
 
-    session_kwh = 0.0  # will be set below
+    # Needed later for SOC simulation
+    battery_capacity = None
+    arrival_soc = None
+    target_soc = None
 
+    # Placeholder to fill later
+    session_kwh = 0.0
+
+    # -------------------------------------------
+    # When SOC-based mode is used
+    # -------------------------------------------
     if energy_method == "SOC-based charging":
         battery_capacity = st.sidebar.number_input(
             "EV battery capacity (kWh)",
@@ -258,34 +273,42 @@ if page == "EV Optimizer (15-min)":
         )
 
         arrival_soc = st.sidebar.slider(
-            "Arrival SOC (%)", min_value=0, max_value=100,
-            value=30, step=1
+            "Arrival SOC (%)", 0, 100, 30
         )
         target_soc = st.sidebar.slider(
-            "Target SOC at departure (%)", min_value=0, max_value=100,
-            value=80, step=1
+            "Target SOC (%)", 0, 100, 80
         )
 
         if target_soc <= arrival_soc:
-            st.sidebar.warning("Target SOC is <= arrival SOC → no charging needed.")
+            st.sidebar.warning("Target SOC ≤ arrival SOC → no charging needed.")
             required_kwh = 0.0
         else:
             required_kwh = battery_capacity * (target_soc - arrival_soc) / 100.0
 
         session_kwh = required_kwh
 
-    else:
-        # Manual kWh per session
-        session_kwh = st.sidebar.number_input(
-            "kWh per charging session (manual)",
-            min_value=0.0, max_value=200.0,
-            value=20.0, step=0.5,
-            help="Energy to charge each time the car is plugged in."
-        )
+        # ---- SOC FEEDBACK ----
+        st.sidebar.markdown("#### SOC Feedback")
+        st.sidebar.write(f"Arrival SOC: **{arrival_soc}%**")
+        st.sidebar.progress(arrival_soc / 100)
 
-    # -----------------------------
-    # PRICE SOURCE SELECTION (DA & ID, 15-min)
-    # -----------------------------
+        st.sidebar.write(f"Target SOC: **{target_soc}%**")
+        st.sidebar.progress(target_soc / 100)
+
+        st.sidebar.write(f"Energy required: **{required_kwh:.1f} kWh**")
+
+    else:
+        # -------------------------------------------
+        # Manual kWh per session
+        # -------------------------------------------
+        session_kwh = st.sidebar.number_input(
+            "kWh per charging session",
+            min_value=0.0, max_value=200.0,
+            value=20.0, step=0.5
+        )
+            # -------------------------------------------
+    # WHOLESALE PRICE SOURCE (DA & ID, 15-MIN)
+    # -------------------------------------------
     st.sidebar.markdown("### Wholesale DA & ID price source")
 
     price_source = st.sidebar.radio(
@@ -308,19 +331,19 @@ if page == "EV Optimizer (15-min)":
         da_file = st.sidebar.file_uploader("Upload DA CSV", type=["csv"])
         id_file = st.sidebar.file_uploader("Upload ID CSV", type=["csv"])
 
-    # -----------------------------
-    # ID FLEXIBILITY (for smart DA+ID scenario)
-    # -----------------------------
+    # -------------------------------------------
+    # ID FLEXIBILITY (Smart DA+ID scenario)
+    # -------------------------------------------
     id_flex_share = st.sidebar.slider(
         "ID flexibility share",
         min_value=0.0, max_value=1.0,
         value=0.5, step=0.05,
-        help="Fraction of charging that can exploit intraday (ID) discounts."
+        help="Fraction of charging that can benefit from ID discounts."
     )
 
-    # -----------------------------
+    # -------------------------------------------
     # RETAIL MARKUP (grid fees + taxes)
-    # -----------------------------
+    # -------------------------------------------
     st.sidebar.markdown("### Retail markup (grid fees + taxes)")
 
     da_retail_markup = st.sidebar.number_input(
@@ -329,75 +352,72 @@ if page == "EV Optimizer (15-min)":
         value=0.12, step=0.01,
         help="All non-energy components (grid fees, taxes, levies, margin)."
     )
-        # ============================================================
-    # LOAD WHOLESALE PRICES (DA & ID, 96 SLOTS)
+
+    # ============================================================
+    # LOAD 96-SLOT WHOLESALE DA & ID PROFILES
     # ============================================================
     da_96, id_96 = get_da_id_profiles_96(
         price_source, year, da_file, id_file
     )
 
-    # Compute ID discount effect (only in smart DA+ID scenario)
+    # ID discount effect (Smart DA+ID scenario)
     id_discount_96 = np.clip(da_96 - id_96, 0, None)
     effective_da_id_96 = da_96 - id_discount_96 * id_flex_share
 
     # ============================================================
-    # ALLOWED SLOTS WINDOW (96 QUARTER-HOURS)
+    # ALLOWED SLOTS (15-MIN) & FEASIBILITY CHECK
     # ============================================================
     allowed_96 = allowed_slots_96(arrival_hour, departure_hour)
-    available_slots = allowed_96.sum()  # number of 15-min intervals EV is home
+    available_slots = allowed_96.sum()  # number of 15-min slots EV is connected
 
-    slot_energy = charger_power * 0.25  # kWh per 15-min
-
+    slot_energy = charger_power * 0.25  # kWh per slot
     max_possible_kwh = available_slots * slot_energy
 
-    # Safety: limit session_kwh to max possible (your chosen Option A)
     if session_kwh > max_possible_kwh:
         st.sidebar.warning(
-            f"Requested charge {session_kwh:.1f} kWh exceeds "
+            f"Requested {session_kwh:.1f} kWh per session exceeds "
             f"maximum possible {max_possible_kwh:.1f} kWh "
             f"in the arrival→departure window. "
-            "Capping it to the maximum possible."
+            "Capping to the physical maximum."
         )
         session_kwh = max_possible_kwh
 
     # ============================================================
-    # PRICE CURVES FOR BILLING (96 SLOTS)
+    # RETAIL PRICE CURVES FOR BILLING (96 SLOTS)
     # ============================================================
-
-    # Baseline uses a flat retail price (16 slots per hour)
+    # Baseline: flat retail
     baseline_curve_96 = np.full(96, energy_flat)
 
-    # Retail DA-indexed tariff (DA + markup) – used for DA-indexed scenario
+    # DA-indexed retail tariff (DA + markup)
     da_indexed_curve_96 = da_96 + da_retail_markup
 
-    # Retail curves for smart scenarios:
+    # Smart DA & Smart DA+ID retail curves:
     retail_da_96 = da_96 + da_retail_markup
     retail_da_id_96 = effective_da_id_96 + da_retail_markup
-
-    # ============================================================
+        # ============================================================
     # CHARGING PROFILES (15-MIN SMART SCHEDULING)
     # ============================================================
 
-    # Baseline (flat retail; no optimisation)
+    # Baseline (flat retail price)
     charge_baseline_96 = optimise_charging_96(
         baseline_curve_96, allowed_96, session_kwh, charger_power
     )
 
-    # Retail DA-indexed (no smart shifting; behaves like baseline)
+    # Retail DA-indexed (no smart shifting → same pattern as baseline)
     charge_da_indexed_96 = charge_baseline_96.copy()
 
-    # Smart DA optimisation (schedule using wholesale DA)
+    # Smart DA optimisation (uses wholesale DA prices)
     charge_smart_da_96 = optimise_charging_96(
         da_96, allowed_96, session_kwh, charger_power
     )
 
-    # Smart DA+ID optimisation (schedule using DA+ID wholesale)
+    # Smart DA+ID optimisation (uses DA+ID effective prices)
     charge_smart_full_96 = optimise_charging_96(
         effective_da_id_96, allowed_96, session_kwh, charger_power
     )
 
     # ============================================================
-    # SESSION COST (WITH RETAIL BILLING)
+    # SESSION COSTS (with RETAIL billing)
     # ============================================================
 
     session_cost_baseline = session_cost_96(charge_baseline_96, baseline_curve_96)
@@ -417,13 +437,15 @@ if page == "EV Optimizer (15-min)":
     total_kwh_year = sessions_per_year * session_kwh
 
     def eff_price(annual_cost):
-        return annual_cost / total_kwh_year if total_kwh_year > 0 else 0.0
+        if total_kwh_year == 0:
+            return 0.0
+        return annual_cost / total_kwh_year
 
     # ============================================================
-    # SUMMARY DISPLAY
+    # MAIN OUTPUT SUMMARY
     # ============================================================
 
-    st.title("🚗 EV Optimizer (15-min Resolution)")
+    st.title("🚗 EV Optimizer — 15-minute Resolution")
 
     st.markdown(
         f"**Sessions/year:** {sessions_per_year:.1f}  \n"
@@ -460,6 +482,29 @@ if page == "EV Optimizer (15-min)":
         f"**{best['Annual Cost (€)']:.0f} € / year** "
         f"({best['Effective Price (€/kWh)']:.3f} €/kWh)"
     )
+
+    # ============================================================
+    # COST BAR CHART
+    # ============================================================
+
+    st.subheader("Cost Comparison (Bar Chart)")
+
+    cost_chart = (
+        alt.Chart(results_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("Scenario:N", sort=None),
+            y=alt.Y("Annual Cost (€):Q"),
+            tooltip=[
+                "Scenario",
+                alt.Tooltip("Annual Cost (€):Q", format=".0f"),
+                alt.Tooltip("Effective Price (€/kWh):Q", format=".3f")
+            ]
+        )
+        .properties(height=330)
+    )
+
+    st.altair_chart(cost_chart, use_container_width=True)
         # ============================================================
     # SIMPLE CHARGING PATTERN VISUALISATION (15-min → hourly)
     # ============================================================
@@ -469,7 +514,7 @@ if page == "EV Optimizer (15-min)":
     # ------------------------------
     # Convert 96-slot (15-min) charge arrays into 24 hourly totals
     # ------------------------------
-    # reshape(24,4) sums each group of 4 quarter-hours → 1 hour
+    # Each hour = sum of its 4 quarter-hours
     baseline_hourly = charge_baseline_96.reshape(24, 4).sum(axis=1)
     da_indexed_hourly = charge_da_indexed_96.reshape(24, 4).sum(axis=1)
     smart_da_hourly = charge_smart_da_96.reshape(24, 4).sum(axis=1)
@@ -484,7 +529,7 @@ if page == "EV Optimizer (15-min)":
         hours_window = list(range(arrival_hour, 24)) + list(range(0, departure_hour))
 
     # ------------------------------
-    # Build DataFrame for chart
+    # Build DataFrame for the chart
     # ------------------------------
     charging_pattern_df = pd.DataFrame({
         "Hour": hours_window,
@@ -501,7 +546,7 @@ if page == "EV Optimizer (15-min)":
     )
 
     # ------------------------------
-    # Cleanest visualization: one panel per scenario
+    # Cleanest view: one panel per scenario
     # ------------------------------
     charging_chart = (
         alt.Chart(charging_long)
@@ -510,7 +555,7 @@ if page == "EV Optimizer (15-min)":
             x=alt.X(
                 "Hour:O",
                 title="Hour of Day",
-                sort=hours_window      # ensures correct chronological order
+                sort=hours_window  # preserve arrival→departure order
             ),
             y=alt.Y("kWh:Q", title="Charging (kWh)"),
             color="Scenario:N",
@@ -527,109 +572,252 @@ if page == "EV Optimizer (15-min)":
 
     st.markdown(
         """
-        ### How to read this chart
-        - Only the hours **between arrival and departure** are shown.
-        - Each scenario appears in its **own panel** (easier to compare).
-        - Smart DA and Smart DA+ID shift charging into the **cheapest 15-minute blocks**, aggregated hourly for clarity.
-        - Baseline and DA-indexed scenarios usually look similar because retail DA-indexing does not change physical charging behavior.
+        **How to read this chart:**
+
+        - Only hours where the EV is connected are shown (between arrival and departure).
+        - Each panel is one scenario:
+            - Baseline (flat retail)
+            - Retail DA-indexed
+            - Smart DA
+            - Smart DA+ID
+        - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
         """
     )
+        # ============================================================
+    # OPTIONAL: RANDOM ARRIVAL / SOC SIMULATION (MONTE CARLO)
     # ============================================================
-# PRICE MANAGER PAGE (15-MIN SIMPLIFIED)
+
+    st.subheader("🎲 Random Arrival Simulation (Optional)")
+
+    simulate = st.checkbox("Enable random arrival & SOC simulation")
+
+    if simulate:
+
+        # Number of Monte Carlo samples
+        n_sim = st.slider(
+            "Number of simulated charging sessions",
+            min_value=100, max_value=2000,
+            value=500, step=100
+        )
+
+        # Arrival time variation (± hours)
+        arrival_jitter = st.slider(
+            "Arrival time jitter (± hours)",
+            min_value=0.0, max_value=4.0,
+            value=2.0, step=0.5,
+            help="0 = always same arrival hour; larger = more random arrival times."
+        )
+
+        # SOC variation only applies if SOC-based mode is used
+        if energy_method == "SOC-based charging" and battery_capacity is not None:
+            soc_jitter = st.slider(
+                "Arrival SOC jitter (± %)",
+                min_value=0, max_value=50,
+                value=10, step=5,
+                help="Random variation around the chosen arrival SOC."
+            )
+        else:
+            soc_jitter = 0
+
+        rng = np.random.default_rng()
+
+        # Cost arrays
+        costs_baseline = []
+        costs_da_idx = []
+        costs_smart_da = []
+        costs_smart_full = []
+
+        for _ in range(n_sim):
+
+            # ------------------------
+            # Random arrival hour
+            # ------------------------
+            if arrival_jitter > 0:
+                a = arrival_hour + rng.normal(0, arrival_jitter / 2.0)
+                a = int(np.round(a)) % 24
+            else:
+                a = arrival_hour
+
+            # Allowed slots for simulated arrival time
+            allowed_i = allowed_slots_96(a, departure_hour)
+            avail_slots_i = allowed_i.sum()
+            max_kwh_i = avail_slots_i * slot_energy
+
+            # ------------------------
+            # Random SOC (if enabled)
+            # ------------------------
+            if energy_method == "SOC-based charging" and battery_capacity:
+                if soc_jitter > 0:
+                    arr_soc_i = arrival_soc + rng.normal(0, soc_jitter / 2.0)
+                    arr_soc_i = float(np.clip(arr_soc_i, 0, target_soc))
+                else:
+                    arr_soc_i = float(arrival_soc)
+
+                req_kwh_i = battery_capacity * (target_soc - arr_soc_i) / 100.0
+                req_kwh_i = max(req_kwh_i, 0.0)
+            else:
+                req_kwh_i = session_kwh
+
+            # Cap by physical max
+            req_kwh_i = min(req_kwh_i, max_kwh_i)
+
+            # ------------------------
+            # Run all 4 optimisations
+            # ------------------------
+            c_base = optimise_charging_96(baseline_curve_96, allowed_i, req_kwh_i, charger_power)
+            c_daidx = c_base.copy()
+            c_da = optimise_charging_96(da_96, allowed_i, req_kwh_i, charger_power)
+            c_full = optimise_charging_96(effective_da_id_96, allowed_i, req_kwh_i, charger_power)
+
+            # ------------------------
+            # Retail billed session cost
+            # ------------------------
+            costs_baseline.append(session_cost_96(c_base, baseline_curve_96))
+            costs_da_idx.append(session_cost_96(c_daidx, da_indexed_curve_96))
+            costs_smart_da.append(session_cost_96(c_da, retail_da_96))
+            costs_smart_full.append(session_cost_96(c_full, retail_da_id_96))
+
+        # ------------------------
+        # Summaries
+        # ------------------------
+        def summarize(costs):
+            arr = np.array(costs)
+            return float(arr.mean()), float(arr.min()), float(arr.max())
+
+        mean_b, min_b, max_b = summarize(costs_baseline)
+        mean_da, min_da, max_da = summarize(costs_da_idx)
+        mean_sda, min_sda, max_sda = summarize(costs_smart_da)
+        mean_sfull, min_sfull, max_sfull = summarize(costs_smart_full)
+
+        # Annualised mean cost (for reference)
+        annual_mean_b = mean_b * sessions_per_year
+        annual_mean_da = mean_da * sessions_per_year
+        annual_mean_sda = mean_sda * sessions_per_year
+        annual_mean_sfull = mean_sfull * sessions_per_year
+
+        # ------------------------
+        # Table Output
+        # ------------------------
+        sim_df = pd.DataFrame([
+            ["Baseline (flat retail)",       mean_b,  min_b,  max_b,  annual_mean_b],
+            ["Retail DA-indexed",            mean_da, min_da, max_da, annual_mean_da],
+            ["Smart DA optimisation",        mean_sda, min_sda, max_sda, annual_mean_sda],
+            ["Smart DA+ID optimisation",     mean_sfull, min_sfull, max_sfull, annual_mean_sfull],
+        ], columns=[
+            "Scenario",
+            "Mean cost/session (€)",
+            "Min cost/session (€)",
+            "Max cost/session (€)",
+            "Mean annual cost (€)"
+        ])
+
+        st.markdown("### Simulation Results")
+        st.dataframe(
+            sim_df.style.format({
+                "Mean cost/session (€)": "{:.2f}",
+                "Min cost/session (€)": "{:.2f}",
+                "Max cost/session (€)": "{:.2f}",
+                "Mean annual cost (€)": "{:.0f}",
+            }),
+            use_container_width=True
+        )
+
+        st.markdown(
+            "_These simulated values account for variability in arrival times "
+            "and arrival SOC levels, giving a more realistic picture of annual cost._"
+        )
+        # ============================================================
+# PRICE MANAGER PAGE (15-MIN CLEANER VERSION)
 # ============================================================
 
-if page == "Price Manager":
+if page == "Price Manager (15-min)":
 
-    st.title("📈 Price Manager – 15-min DA/ID Loader")
+    st.title("📈 Price Manager – Import & Clean 15-min DA/ID")
 
     st.markdown(
         """
-        Upload raw ENTSO-E or compatible CSVs containing **15-min DA/ID prices**.
+        Upload raw ENTSO-E (or similar) CSV files that contain **15-minute**
+        Day-Ahead (DA) or Intraday (ID) price data.
 
         This tool will:
-        - Parse datetime  
+        - Detect datetime and price columns  
         - Convert €/MWh → €/kWh  
-        - Align everything to exact **15-minute intervals**  
-        - Save as `data/da_YEAR.csv` or `data/id_YEAR.csv`  
+        - Resample to an exact 15-minute frequency  
+        - Save a clean file to `/data` for historical use in the optimizer  
 
-        ⚠️ In this simplified version:
-        - No charts
-        - No visualisation
-        - Only preview + cleaning + saving
+        ⚠️ This is a simplified utility:
+        - No charts  
+        - No advanced analysis  
+        - Only preview + cleaning + saving  
         """
     )
 
-    # -----------------------------
-    # SELECT PRICE TYPE
-    # -----------------------------
+    # -------------------------------------------
+    # Select whether DA or ID file is being uploaded
+    # -------------------------------------------
     upload_type = st.selectbox(
-        "Select price type",
+        "Select price type to import",
         ["Day-Ahead (DA)", "Intraday (ID)"]
     )
 
+    # File upload
     raw_file = st.file_uploader(
         "Upload raw price CSV",
         type=["csv"],
-        help="Upload ENTSO-E or any CSV containing 15-min DA/ID prices."
+        help="Upload DA/ID CSV file containing 15-min prices."
     )
 
     if raw_file is not None:
-
         df_raw = pd.read_csv(raw_file)
 
-        st.subheader("🔍 Raw file preview")
+        st.subheader("🔍 Raw File Preview")
         st.dataframe(df_raw.head(), use_container_width=True)
 
-        # -----------------------------
-        # AUTO-DETECT datetime & price columns
-        # -----------------------------
+        # -------------------------------------------
+        # Auto-detect datetime & price columns
+        # -------------------------------------------
         dt_col = None
         price_col = None
 
-        # Detect datetime
+        # Detect datetime column
         for c in df_raw.columns:
             if ("MTU" in c) or ("date" in c.lower()) or ("time" in c.lower()):
                 dt_col = c
                 break
 
-        # Detect price (€/MWh)
+        # Detect price column
         for c in df_raw.columns:
             if ("MWh" in c) or ("price" in c.lower()):
                 price_col = c
                 break
 
         if dt_col is None or price_col is None:
-            st.error(
-                "❌ Could not detect datetime or price columns. "
-                "Please clean the file manually."
-            )
+            st.error("❌ Could not find datetime or price column automatically.")
         else:
             st.success(f"Detected datetime column: **{dt_col}**")
             st.success(f"Detected price column: **{price_col}**")
 
-            # -----------------------------
-            # CLEAN DATETIME
-            # -----------------------------
+            # -------------------------------------------
+            # Clean datetime column
+            # ENTSO-E format like: "2023-07-01 00:00 – 00:15"
+            # -------------------------------------------
             try:
-                # ENTSO-E MTU format: "2023-01-01 00:00 - 01:00"
                 dt_clean = df_raw[dt_col].astype(str).str.split("-").str[0].str.strip()
                 df_raw["datetime"] = pd.to_datetime(dt_clean)
-            except Exception:
+            except:
                 df_raw["datetime"] = pd.to_datetime(df_raw[dt_col], errors="coerce")
 
-            # -----------------------------
-            # CONVERT €/MWh → €/kWh
-            # -----------------------------
+            # Convert €/MWh → €/kWh
             df_raw["price_eur_mwh"] = pd.to_numeric(df_raw[price_col], errors="coerce")
             df = df_raw.dropna(subset=["datetime", "price_eur_mwh"]).copy()
             df["price_eur_kwh"] = df["price_eur_mwh"] / 1000.0
 
-            st.subheader("🧹 Cleaned data preview")
+            st.subheader("🧹 Cleaned Data Preview")
             st.dataframe(df.head(), use_container_width=True)
 
-            # -----------------------------
-            # RESAMPLE TO EXACT 15-MIN FREQUENCY
-            # -----------------------------
+            # -------------------------------------------
+            # EXACT 15-min resample
+            # -------------------------------------------
             df_15 = (
                 df.set_index("datetime")["price_eur_kwh"]
                 .resample("15min")
@@ -638,45 +826,48 @@ if page == "Price Manager":
 
             if len(df_15) < 96:
                 st.warning(
-                    "The data does not contain at least 96 quarter-hours. "
-                    "Make sure you uploaded a full day."
+                    "⚠️ This file does not contain a full 96 quarter-hours. "
+                    "Make sure your raw file has complete 15-min data."
                 )
 
-            # -----------------------------
-            # SAVE CLEANED DATA TO /data
-            # -----------------------------
+            # -------------------------------------------
+            # Choose which year this dataset belongs to
+            # -------------------------------------------
             year_save = st.number_input(
                 "Assign this dataset to year:",
                 min_value=2000, max_value=2100,
                 value=2023, step=1
             )
 
-            if st.button("💾 Save cleaned 15-min price data"):
+            # -------------------------------------------
+            # Save cleaned file
+            # -------------------------------------------
+            if st.button("💾 Save cleaned 15-min price file"):
                 name = "da" if upload_type.startswith("Day") else "id"
                 out_path = DATA_DIR / f"{name}_{int(year_save)}.csv"
 
                 out_df = pd.DataFrame({
                     "datetime": df_15.index,
-                    "price_eur_kwh": df_15.values * 1000   # store back as €/MWh like ENTSO-E
+                    "price_eur_mwh": df_15.values * 1000,  # store as €/MWh like ENTSO-E
                 })
 
                 out_df.to_csv(out_path, index=False)
                 st.success(f"Saved cleaned file to: `{out_path}`")
-
-    # -----------------------------
+    # -------------------------------------------
     # SHOW EXISTING CLEANED FILES
-    # -----------------------------
-    st.subheader("📂 Existing cleaned files in /data")
+    # -------------------------------------------
 
-    files = list(DATA_DIR.glob("*.csv"))
+    st.subheader("📂 Existing cleaned 15-min price files")
+
+    files = sorted(DATA_DIR.glob("*.csv"))
     if not files:
-        st.info("No cleaned 15-min price files yet.")
+        st.info("No cleaned DA/ID files found in `/data` yet.")
     else:
         for f in files:
-            st.write("•", f.name)
+            st.write(f"• `{f.name}`")
 
 # ============================================================
-# FOOTER (OPTIONAL)
+# FOOTER (APPEARS ON EVERY PAGE)
 # ============================================================
 
 def app_footer():
@@ -684,17 +875,22 @@ def app_footer():
         """
         <hr>
 
-        <div style="font-size:13px; color:#666; text-align:center;">
-        EV Optimizer – 15-Minute Resolution<br>
-        Smart DA & Smart DA+ID Scheduling Engine<br>
-        Built with Streamlit · Altair · NumPy · Pandas<br><br>
-        Version: 2.0 (15-min upgrade)
+        <div style="text-align:center; color:#666; font-size:13px;">
+        EV Optimizer – 15-Minute DA/ID Engine<br>
+        Smart Day-Ahead & Intraday Scheduling<br>
+        Includes SOC Feedback & Random Arrival Simulation<br><br>
+        Version 2.0 · Built with Streamlit · Altair · NumPy · Pandas
         </div>
         """,
         unsafe_allow_html=True
     )
 
+# Display footer on all pages
 app_footer()
+
+
+
+
 
 
 
