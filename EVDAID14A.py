@@ -757,6 +757,76 @@ if page == "EV Optimizer (15-min)":
 
         st.altair_chart(hist_arrival, use_container_width=True)
 
+        # ============================================================
+        # VISUAL 2: Scatter plot (Arrival Hour → Cost Per Session)
+        # ============================================================
+
+        st.subheader("📈 Arrival Hour vs Cost Per Session")
+
+        # Recalculate arrival hours and costs (minimal overhead)
+        arrival_list_scatter = []
+        cost_list_scatter = []
+
+        for _ in range(n_sim):
+
+            # Random arrival
+            if arrival_jitter > 0:
+                a = arrival_hour + rng.normal(0, arrival_jitter / 2.0)
+                a = int(np.round(a)) % 24
+            else:
+                a = arrival_hour
+
+            arrival_list_scatter.append(a)
+
+            # Allowed slots for this session
+            allowed_i = allowed_slots_96(a, departure_hour)
+            avail_slots_i = allowed_i.sum()
+            max_kwh_i = avail_slots_i * slot_energy
+
+            # Required energy (SOC or manual)
+            if energy_method == "SOC-based charging" and battery_capacity:
+                if soc_jitter > 0:
+                    arr_soc_i = arrival_soc + rng.normal(0, soc_jitter / 2.0)
+                    arr_soc_i = float(np.clip(arr_soc_i, 0, target_soc))
+                else:
+                    arr_soc_i = float(arrival_soc)
+
+                req_kwh_i = battery_capacity * (target_soc - arr_soc_i) / 100.0
+                req_kwh_i = max(req_kwh_i, 0.0)
+            else:
+                req_kwh_i = session_kwh
+
+            req_kwh_i = min(req_kwh_i, max_kwh_i)
+
+            # Cost for *best* scenario (smart DA+ID)
+            c_full = optimise_charging_96(effective_da_id_96, allowed_i, req_kwh_i, charger_power)
+            cost = session_cost_96(c_full, retail_da_id_96)
+            cost_list_scatter.append(cost)
+
+        scatter_df = pd.DataFrame({
+            "ArrivalHour": arrival_list_scatter,
+            "Cost": cost_list_scatter
+        })
+
+        scatter_plot = (
+            alt.Chart(scatter_df)
+            .mark_circle(size=60, opacity=0.6)
+            .encode(
+                x=alt.X("ArrivalHour:O", title="Arrival Hour"),
+                y=alt.Y("Cost:Q", title="Cost per Session (€)"),
+                tooltip=["ArrivalHour", alt.Tooltip("Cost", format=".2f")]
+            )
+            .properties(height=250)
+        )
+
+        st.altair_chart(scatter_plot, use_container_width=True)
+
+        st.markdown(
+            "_This scatter shows how arrival-time variability affects cost. "
+            "Later arrivals typically reduce flexibility and increase cost._"
+        )
+
+
 # ============================================================
 # PRICE MANAGER PAGE (15-MIN CLEANER VERSION)
 # ============================================================
