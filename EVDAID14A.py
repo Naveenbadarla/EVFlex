@@ -4,148 +4,116 @@ import numpy as np
 import altair as alt
 from pathlib import Path
 
-st.set_page_config(page_title="EV Hourly Optimizer (DA + ID)", layout="wide")
+st.set_page_config(page_title="EV Hourly Optimizer (DA + ID + Retail Markup)", layout="wide")
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
 # ============================================================
-# PRICE UTILITIES (shared)
+# PRICE UTILITIES
 # ============================================================
 
 def load_clean_price_csv(source) -> pd.Series:
     """
-    Load a 'datetime, price_eur_mwh' CSV from a Path or file-like
-    and return a pandas Series indexed by datetime, values in €/kWh.
+    Load a 'datetime, price_eur_mwh' CSV and return a pandas Series indexed by
+    datetime, values in €/kWh.
     """
     df = pd.read_csv(source)
     if "datetime" not in df.columns:
         raise ValueError("'datetime' column not found in CSV")
 
-    # Try to detect price column
     price_col = None
     for c in df.columns:
         if c.lower().startswith("price"):
             price_col = c
             break
     if price_col is None:
-        raise ValueError("No price column found (expected something like 'price_eur_mwh').")
+        raise ValueError("No price column found in CSV.")
 
     df["datetime"] = pd.to_datetime(df["datetime"])
     df = df.sort_values("datetime")
 
-    # Convert €/MWh -> €/kWh
     df["price_eur_kwh"] = df[price_col] / 1000.0
     return df.set_index("datetime")["price_eur_kwh"]
 
 
 def hourly_profile_from_series(series: pd.Series) -> np.ndarray:
     """
-    Take a datetime-indexed series (hourly or more frequent),
-    return a 24-element numpy array with mean price per hour-of-day.
+    Converts any timestamped price series to a 24-element (hour 0–23)
+    average price profile.
     """
-    s = series.copy()
-    # Resample to hourly if needed
-    s = s.resample("1H").mean()
+    s = series.resample("1H").mean()
     df = s.to_frame("price")
     df["hour"] = df.index.hour
     hourly = df.groupby("hour")["price"].mean()
-    # Ensure we have all 24 hours
     hourly = hourly.reindex(range(24), fill_value=hourly.mean())
     return hourly.values
 
 
-def synthetic_da_id_profiles() -> tuple[np.ndarray, np.ndarray]:
+def synthetic_da_id_profiles():
     """
-    Fallback synthetic 24h DA and ID price profiles in €/kWh.
-    DA: simple realistic shape.
-    ID: slightly lower where DA is high.
+    A realistic fallback 24h price shape.
     """
     da = np.array([
-        0.28, 0.25, 0.22, 0.19, 0.17, 0.15, 0.14, 0.15,
-        0.18, 0.20, 0.25, 0.30, 0.32, 0.34, 0.33, 0.31,
-        0.28, 0.26, 0.25, 0.24, 0.23, 0.22, 0.22, 0.24
+        0.28,0.25,0.22,0.19,0.17,0.15,0.14,0.15,
+        0.18,0.20,0.25,0.30,0.32,0.34,0.33,0.31,
+        0.28,0.26,0.25,0.24,0.23,0.22,0.22,0.24
     ])
-    # ID slightly cheaper in high-price hours
     id_prices = da - np.clip(da - da.min(), 0, 0.03)
-    id_prices = np.maximum(id_prices, 0.0)
+    id_prices = np.maximum(id_prices, 0)
     return da, id_prices
 
 
 def get_da_id_profiles(price_source, year, da_file, id_file):
-    """
-    Returns (da_24h, id_24h) numpy arrays in €/kWh.
-    """
-    # Synthetic fallback
+    """Return (da_24, id_24) in €/kWh."""
     if price_source == "Synthetic example":
         return synthetic_da_id_profiles()
 
-    # Built-in historical
     if price_source == "Built-in historical (data/…csv)":
-        if year is None:
-            return synthetic_da_id_profiles()
         da_path = DATA_DIR / f"da_{year}.csv"
         id_path = DATA_DIR / f"id_{year}.csv"
         if not da_path.exists() or not id_path.exists():
-            st.warning(f"DA/ID files for year {year} not found in data/. Using synthetic prices.")
+            st.warning(f"Historical data for year {year} missing, using synthetic.")
             return synthetic_da_id_profiles()
         da_series = load_clean_price_csv(da_path)
         id_series = load_clean_price_csv(id_path)
-        da_24 = hourly_profile_from_series(da_series)
-        id_24 = hourly_profile_from_series(id_series)
-        return da_24, id_24
+        return hourly_profile_from_series(da_series), hourly_profile_from_series(id_series)
 
-    # User-uploaded CSVs
     if price_source == "Upload DA+ID CSVs":
         if da_file is None or id_file is None:
-            st.warning("Please upload both DA and ID CSV files. Using synthetic prices until then.")
+            st.warning("Upload both DA and ID CSV files.")
             return synthetic_da_id_profiles()
         da_series = load_clean_price_csv(da_file)
         id_series = load_clean_price_csv(id_file)
-        da_24 = hourly_profile_from_series(da_series)
-        id_24 = hourly_profile_from_series(id_series)
-        return da_24, id_24
+        return hourly_profile_from_series(da_series), hourly_profile_from_series(id_series)
 
-    # Safety fallback
     return synthetic_da_id_profiles()
 
 
 # ============================================================
-# EV + OPTIMISATION UTILITIES
+# EV OPTIMISATION UTILITIES
 # ============================================================
 
-def allowed_hours_array(arrival_hour: int, departure_hour: int) -> np.ndarray:
-    """
-    Boolean array of length 24 indicating when the car is at home.
-    """
+def allowed_hours_array(arrival_hour, departure_hour):
+    """Return boolean array [24] for when EV is connected."""
     allowed = np.zeros(24, dtype=bool)
     for h in range(24):
         if arrival_hour <= departure_hour:
             allowed[h] = (arrival_hour <= h < departure_hour)
         else:
-            # Wrap around midnight
             allowed[h] = (h >= arrival_hour or h < departure_hour)
     return allowed
 
 
-def optimise_charging(cost_curve: np.ndarray,
-                      allowed_hours: np.ndarray,
-                      session_kwh: float,
-                      charger_power: float) -> np.ndarray:
-    """
-    Greedy optimisation: fill the cheapest allowed hours first.
-    cost_curve: €/kWh for each hour 0..23.
-    """
+def optimise_charging(cost_curve, allowed, session_kwh, charger_power):
+    """Greedy cheapest-hour optimiser."""
     if session_kwh <= 0:
         return np.zeros(24)
 
-    remaining = session_kwh
     charge = np.zeros(24)
+    remaining = session_kwh
 
-    cheap_hours = sorted(
-        [h for h in range(24) if allowed_hours[h]],
-        key=lambda h: cost_curve[h]
-    )
+    cheap_hours = sorted([h for h in range(24) if allowed[h]], key=lambda h: cost_curve[h])
 
     for h in cheap_hours:
         if remaining <= 0:
@@ -157,12 +125,9 @@ def optimise_charging(cost_curve: np.ndarray,
     return charge
 
 
-def session_cost(charge: np.ndarray, curve: np.ndarray) -> float:
-    """
-    Cost of one charging session in €.
-    charge[h] in kWh, curve[h] in €/kWh.
-    """
-    return float(np.sum(charge * curve))
+def session_cost(charge, retail_curve):
+    """Cost = Σ charge[h] * retail_price[h]."""
+    return float(np.sum(charge * retail_curve))
 
 
 # ============================================================
@@ -177,368 +142,255 @@ page = st.sidebar.radio("Select page", ["EV Optimizer", "Price Manager"])
 # ============================================================
 
 if page == "EV Optimizer":
-    st.sidebar.markdown("---")
-    st.sidebar.title("🚗 EV Hourly Optimizer (DA + ID)")
 
-    # EV energy + frequency
-    ev_annual_kwh = st.sidebar.number_input(
-        "EV annual charging need (kWh/year)",
-        min_value=0.0, value=2000.0, step=100.0
-    )
+    st.sidebar.title("🚗 EV Hourly Optimizer (DA + ID + Markup)")
 
-    charger_power = st.sidebar.number_input(
-        "Charger power (kW)",
-        min_value=1.0, value=11.0, step=1.0
-    )
+    # ---- EV inputs ----
+    ev_annual_kwh = st.sidebar.number_input("EV annual need (kWh/year)", 0.0, value=2000.0)
+    charger_power = st.sidebar.number_input("Charger power (kW)", 1.0, 22.0, value=11.0)
 
     freq_choice = st.sidebar.selectbox(
         "Charging frequency",
-        [
-            "Every day",
-            "Every 2 days",
-            "Weekdays only",
-            "Weekends only",
-            "Custom days per week",
-        ]
+        ["Every day","Every 2 days","Weekdays only","Weekends only","Custom days per week"]
     )
 
     custom_days = 7
     if freq_choice == "Custom days per week":
-        custom_days = st.sidebar.slider("Days per week", 1, 7, 3)
+        custom_days = st.sidebar.slider("Days per week", 1, 7, 4)
 
-    if freq_choice == "Every day":
-        sessions_per_year = 365
-    elif freq_choice == "Every 2 days":
-        sessions_per_year = 365 / 2.0
-    elif freq_choice == "Weekdays only":
-        sessions_per_year = 5 * 52
-    elif freq_choice == "Weekends only":
-        sessions_per_year = 2 * 52
-    else:
-        sessions_per_year = custom_days * 52
+    if freq_choice == "Every day": sessions_per_year = 365
+    elif freq_choice == "Every 2 days": sessions_per_year = 365/2
+    elif freq_choice == "Weekdays only": sessions_per_year = 5*52
+    elif freq_choice == "Weekends only": sessions_per_year = 2*52
+    else: sessions_per_year = custom_days*52
 
-    default_session_kwh = ev_annual_kwh / sessions_per_year if sessions_per_year > 0 else 0.0
+    default_session_kwh = ev_annual_kwh / sessions_per_year if sessions_per_year else 0
 
     session_kwh = st.sidebar.number_input(
-        "kWh to charge per session",
-        min_value=0.0,
-        value=float(round(default_session_kwh, 2)),
-        step=0.1,
-        help="Energy the EV needs each time it is plugged in."
+        "kWh per charging session", 0.0, 200.0, value=round(default_session_kwh, 2)
     )
 
     arrival_hour = st.sidebar.slider("Arrival hour", 0, 23, 18)
     departure_hour = st.sidebar.slider("Departure hour", 0, 23, 7)
 
+    # Retail flat price
     energy_flat = st.sidebar.number_input(
-        "Flat retail energy price (€/kWh)",
-        min_value=0.01, value=0.30, step=0.01,
-        help="Average retail price you pay without optimisation."
+        "Flat retail price (€/kWh)", 0.01, 1.0, value=0.30
     )
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### DA & ID price source")
-
-    price_source = st.sidebar.radio(
-        "Select price source",
-        [
-            "Synthetic example",
-            "Built-in historical (data/…csv)",
-            "Upload DA+ID CSVs",
-        ]
-    )
+    # ---- Price source ----
+    st.sidebar.markdown("### Price data source")
+    price_source = st.sidebar.radio("Source", [
+        "Synthetic example",
+        "Built-in historical (data/…csv)",
+        "Upload DA+ID CSVs"
+    ])
 
     year = None
     da_file = None
     id_file = None
-
     if price_source == "Built-in historical (data/…csv)":
-        year = st.sidebar.selectbox("Historical year", [2022, 2023, 2024])
+        year = st.sidebar.selectbox("Year", [2022, 2023, 2024])
     elif price_source == "Upload DA+ID CSVs":
-        da_file = st.sidebar.file_uploader("Upload DA price CSV", type=["csv"])
-        id_file = st.sidebar.file_uploader("Upload ID price CSV", type=["csv"])
+        da_file = st.sidebar.file_uploader("Upload DA CSV", type=["csv"])
+        id_file = st.sidebar.file_uploader("Upload ID CSV", type=["csv"])
 
-    st.sidebar.markdown("### ID flexibility")
-
+    # ---- ID flexibility ----
     id_flex_share = st.sidebar.slider(
-        "Fraction of charging benefiting from ID (0–1)",
-        0.0, 1.0, 0.5,
-        help="0 = ignore ID, 1 = all DA-chosen charging can be price-improved by ID."
+        "ID flexibility share", 0.0, 1.0, value=0.5,
+        help="Fraction of charging that can benefit from ID discount."
     )
 
-    st.sidebar.markdown("### Dynamic retail DA tariff")
-
+    # ---- Retail markup ----
+    st.sidebar.markdown("### Retail markup (grid fees + taxes)")
     da_retail_markup = st.sidebar.number_input(
-        "Retail DA markup (€/kWh)",
-        min_value=0.0, value=0.03, step=0.01,
-        help="Extra margin on top of wholesale DA/ID for a dynamic retail tariff."
+        "Markup (€/kWh)", 0.00, 1.00, value=0.12,
+        help="Typical total markup ≈ 0.10–0.16 €/kWh."
     )
 
-    # LOAD PRICES (24h DA & ID)
+    # === LOAD PRICES ===
     da_24, id_24 = get_da_id_profiles(price_source, year, da_file, id_file)
 
-    # Discount where ID < DA
+    # ID discount (wholesale)
     id_discount = np.clip(da_24 - id_24, 0, None)
-    # Only some fraction of kWh gets that benefit
     effective_da_id = da_24 - id_discount * id_flex_share
 
-    # ALLOWED HOURS & FEASIBILITY
+    # Allowed hours check
     allowed = allowed_hours_array(arrival_hour, departure_hour)
     available_hours = allowed.sum()
-    max_possible_kwh = available_hours * charger_power
+    max_kwh = available_hours * charger_power
+    if session_kwh > max_kwh:
+        st.warning(f"Session kWh capped to {max_kwh:.2f}")
+        session_kwh = max_kwh
 
-    if session_kwh > max_possible_kwh + 1e-6:
-        st.sidebar.warning(
-            f"Requested {session_kwh:.1f} kWh per session but max possible with "
-            f"{charger_power} kW & {available_hours}h window is {max_possible_kwh:.1f} kWh. "
-            "Charging will be capped at the physical maximum."
-        )
-        session_kwh = max_possible_kwh
+    # ================================================================
+    # COST CURVES (WHOLESALE + MARKUP)
+    # ================================================================
 
-    # COST CURVES PER SCENARIO (€/kWh)
-
-    # 1) Baseline: flat retail price (no DA/ID)
-    baseline_curve = np.full(24, energy_flat)
-
-    # 2) Retail DA-indexed tariff: DA + markup, no smart scheduling
+    # Retail curves (no optimisation behaviour)
     da_indexed_curve = da_24 + da_retail_markup
-
-    # 3) Retail DA+ID-indexed tariff: DA+ID + markup, no smart scheduling
     da_id_indexed_curve = effective_da_id + da_retail_markup
 
-    # 4) Smart DA: DA curve (wholesale)
-    da_only_curve = da_24
+    # Smart wholesale curves = for scheduling only
+    wholesale_da_curve = da_24
+    wholesale_da_id_curve = effective_da_id
 
-    # 5) Smart DA+ID: effective DA+ID curve (wholesale)
-    full_curve = effective_da_id
+    # Retails for smart billing:
+    retail_da_curve = wholesale_da_curve + da_retail_markup
+    retail_da_id_curve = wholesale_da_id_curve + da_retail_markup
 
-    # OPTIMISE DAILY CHARGING PROFILES
+    # ================================================================
+    # CHARGING PROFILES
+    # ================================================================
 
-    # Baseline schedule (same hours regardless of price)
+    # Baseline = no smart shifting
+    baseline_curve = np.full(24, energy_flat)
     charge_baseline = optimise_charging(baseline_curve, allowed, session_kwh, charger_power)
 
-    # Retail DA/DA+ID tariffs use same baseline schedule (no smart shifting)
+    # Retail DA/DA+ID tariffs (no smart shifting)
     charge_da_indexed = charge_baseline.copy()
     charge_da_id_indexed = charge_baseline.copy()
 
-    # Smart wholesale DA and DA+ID use price-optimised schedules
-    charge_da_only = optimise_charging(da_only_curve, allowed, session_kwh, charger_power)
-    charge_full = optimise_charging(full_curve, allowed, session_kwh, charger_power)
+    # Smart wholesale optimization
+    charge_da_only = optimise_charging(wholesale_da_curve, allowed, session_kwh, charger_power)
+    charge_full = optimise_charging(wholesale_da_id_curve, allowed, session_kwh, charger_power)
 
-    # COST PER SESSION & PER YEAR
+    # ================================================================
+    # COST PER SESSION
+    # ================================================================
 
     session_cost_baseline = session_cost(charge_baseline, baseline_curve)
     session_cost_da_indexed = session_cost(charge_da_indexed, da_indexed_curve)
     session_cost_da_id_indexed = session_cost(charge_da_id_indexed, da_id_indexed_curve)
-    session_cost_da_only = session_cost(charge_da_only, da_only_curve)
-    session_cost_full = session_cost(charge_full, full_curve)
 
+    # SMART (billing includes markup)
+    session_cost_smart_da = session_cost(charge_da_only, retail_da_curve)
+    session_cost_smart_full = session_cost(charge_full, retail_da_id_curve)
+
+    # Annual
     annual_baseline = session_cost_baseline * sessions_per_year
     annual_da_indexed = session_cost_da_indexed * sessions_per_year
     annual_da_id_indexed = session_cost_da_id_indexed * sessions_per_year
-    annual_da = session_cost_da_only * sessions_per_year
-    annual_full = session_cost_full * sessions_per_year
+    annual_smart_da = session_cost_smart_da * sessions_per_year
+    annual_smart_full = session_cost_smart_full * sessions_per_year
 
-    total_kwh_year = sessions_per_year * session_kwh if sessions_per_year > 0 else 0.0
+    total_kwh_year = sessions_per_year * session_kwh
 
-    def eff_price(annual_cost):
-        return annual_cost / total_kwh_year if total_kwh_year > 0 else 0.0
+    def eff(annual):
+        return annual/total_kwh_year if total_kwh_year > 0 else 0
 
-    # MAIN PAGE OUTPUT
-    st.title("🚗 EV Hourly Charging Optimizer (DA + ID, retail & wholesale)")
+    # ================================================================
+    # OUTPUT
+    # ================================================================
 
-    st.write(
-        f"**Sessions per year:** {sessions_per_year:.1f}  \n"
-        f"**kWh per session:** {session_kwh:.2f}  \n"
-        f"**Charger power:** {charger_power:.1f} kW  \n"
-        f"**Arrival:** {arrival_hour:02d}:00  –  **Departure:** {departure_hour:02d}:00  \n"
-        f"**Price source:** {price_source}  \n"
-        f"**Retail DA markup:** {da_retail_markup:.3f} €/kWh"
-    )
+    st.title("🚗 EV Hourly Optimizer (Wholesale Scheduling + Retail Billing)")
 
     df = pd.DataFrame([
-        ["Baseline (flat retail price)", annual_baseline, eff_price(annual_baseline)],
-        ["Retail DA-indexed (no smart scheduling)", annual_da_indexed, eff_price(annual_da_indexed)],
-        ["Retail DA+ID-indexed (no smart scheduling)", annual_da_id_indexed, eff_price(annual_da_id_indexed)],
-        ["Smart DA optimisation (wholesale)", annual_da, eff_price(annual_da)],
-        ["Smart DA+ID optimisation (wholesale)", annual_full, eff_price(annual_full)],
-    ], columns=["Scenario", "Annual Cost (€)", "Effective price (€/kWh)"])
+        ["Baseline (flat retail)", annual_baseline, eff(annual_baseline)],
+        ["Retail DA-indexed (no shifting)", annual_da_indexed, eff(annual_da_indexed)],
+        ["Retail DA+ID-indexed (no shifting)", annual_da_id_indexed, eff(annual_da_id_indexed)],
+        ["Smart DA (wholesale scheduling + retail billing)", annual_smart_da, eff(annual_smart_da)],
+        ["Smart DA+ID (wholesale scheduling + retail billing)", annual_smart_full, eff(annual_smart_full)],
+    ], columns=["Scenario", "Annual Cost (€)", "Eff. Price (€/kWh)"])
 
     best = df.loc[df["Annual Cost (€)"].idxmin()]
 
     st.subheader("Annual Cost Comparison")
-    st.dataframe(
-        df.style.format({
-            "Annual Cost (€)": "{:.0f}",
-            "Effective price (€/kWh)": "{:.3f}"
-        }),
-        use_container_width=True
-    )
+    st.dataframe(df.style.format({
+        "Annual Cost (€)": "{:.0f}",
+        "Eff. Price (€/kWh)": "{:.3f}"
+    }), use_container_width=True)
 
     st.success(
-        f"**Best option:** {best['Scenario']} – ~{best['Annual Cost (€)']:.0f} €/year "
-        f"({best['Effective price (€/kWh)']:.3f} €/kWh)."
+        f"BEST: **{best['Scenario']}**, cost **{best['Annual Cost (€)']:.0f} €**, "
+        f"effective price **{best['Eff. Price (€/kWh)']:.3f} €/kWh**."
     )
 
-    # CHARGING SCHEDULE VISUALISATION
+    st.subheader("Charging Schedules")
+
     chart_df = pd.DataFrame({
         "Hour": list(range(24)),
-        "Baseline (flat / retail DA-indexed)": charge_baseline,
-        "Smart DA (wholesale)": charge_da_only,
-        "Smart DA+ID (wholesale)": charge_full,
+        "Baseline": charge_baseline,
+        "Smart DA": charge_da_only,
+        "Smart DA+ID": charge_full,
     })
 
-    st.subheader("Charging Schedule per Day (kWh per hour)")
-
-    melted = chart_df.melt("Hour", var_name="Scenario", value_name="kWh")
     chart = (
-        alt.Chart(melted)
+        alt.Chart(chart_df.melt("Hour"))
         .mark_bar()
         .encode(
-            x=alt.X("Hour:O"),
-            y=alt.Y("kWh:Q"),
-            color="Scenario:N",
-            tooltip=["Hour", "Scenario", "kWh"]
+            x="Hour:O",
+            y="value:Q",
+            color="variable:N"
         )
         .properties(height=300)
     )
 
     st.altair_chart(chart, use_container_width=True)
 
-    st.markdown(
-        """
-        **Notes**  
-        * Baseline = flat retail price, no time dependence.  
-        * Retail DA-indexed / DA+ID-indexed = you pay a dynamic tariff (DA or DA+ID + markup), but you **do not** shift by price.  
-        * Smart DA / Smart DA+ID = wholesale optimisation of charging schedule into cheapest hours.  
-        * No grid-fee / §14a logic in this version – this is pure energy price optimisation.
-        """
-    )
 
 # ============================================================
 # PRICE MANAGER PAGE
 # ============================================================
 
 if page == "Price Manager":
-    st.title("📈 Price Manager – DA/ID Data Tools")
+    st.title("📈 Price Manager – DA/ID Cleaner & Loader")
 
-    st.markdown("""
-    Use this page to upload, clean, visualize, and save DA/ID price data.
-    
-    Supported:
-    - Raw ENTSO-E CSVs
-    - Any table with datetime + €/MWh columns
-    - Auto-detect time & price columns
-    - Auto-resample to hourly
-    - Auto-convert to €/kWh
-    - Auto-save as **data/da_YEAR.csv** or **data/id_YEAR.csv**
-    """)
-
-    st.subheader("1. Upload Raw Price Data")
-
-    upload_type = st.selectbox(
-        "Type of price",
-        ["Day-Ahead (DA)", "Intraday (ID)"]
-    )
-    raw_file = st.file_uploader("Upload raw CSV file", type=["csv"])
+    upload_type = st.selectbox("Data type", ["Day-Ahead (DA)", "Intraday (ID)"])
+    raw_file = st.file_uploader("Upload raw CSV", type=["csv"])
 
     if raw_file:
         df_raw = pd.read_csv(raw_file)
-        st.write("### Raw file preview:")
-        st.dataframe(df_raw.head(), use_container_width=True)
-        
-        st.subheader("2. Auto-clean raw file")
+        st.write("Raw preview:", df_raw.head())
 
-        # Auto-detect datetime and price columns
-        datetime_col = None
+        # ---- Auto-detect datetime and price columns ----
+        dt_col = None
         price_col = None
 
         for c in df_raw.columns:
             if "MTU" in c or "date" in c.lower() or "time" in c.lower():
-                datetime_col = c
+                dt_col = c
                 break
-
         for c in df_raw.columns:
             if "MWh" in c or "price" in c.lower():
                 price_col = c
                 break
-        
-        if not datetime_col or not price_col:
-            st.error("Could not detect datetime/price columns. Please rename your columns or adjust the detection.")
+
+        if not dt_col or not price_col:
+            st.error("Could not auto-detect datetime or price column.")
         else:
-            st.success(f"Detected datetime='{datetime_col}', price='{price_col}'")
+            df = df_raw[[dt_col, price_col]].copy()
 
-            df = df_raw[[datetime_col, price_col]].copy()
-
-            # handle ENTSO-E MTU format "2023-01-01 00:00 - 01:00"
             try:
-                df["datetime"] = df[datetime_col].astype(str).str.split("-").str[0].str.strip()
+                df["datetime"] = df[dt_col].astype(str).str.split("-").str[0].str.strip()
                 df["datetime"] = pd.to_datetime(df["datetime"])
-            except Exception:
-                df["datetime"] = pd.to_datetime(df[datetime_col], errors="coerce")
+            except:
+                df["datetime"] = pd.to_datetime(df[dt_col], errors="coerce")
 
             df["price_eur_mwh"] = pd.to_numeric(df[price_col], errors="coerce")
             df = df.dropna(subset=["datetime", "price_eur_mwh"]).sort_values("datetime")
 
-            st.write("### Cleaned data preview:")
-            st.dataframe(df.head())
+            st.write("Cleaned preview:", df.head())
 
-            # Convert to €/kWh
-            df["price_eur_kwh"] = df["price_eur_mwh"] / 1000.0
-
-            # Resample hourly
-            df_hourly = df.set_index("datetime")["price_eur_kwh"].resample("1H").mean()
-            df_hourly = df_hourly.dropna()
-
-            st.write("### Hourly-resampled data (€/kWh):")
+            df_hourly = (
+                df.set_index("datetime")["price_eur_mwh"]
+                .resample("1H").mean() / 1000.0
+            )
+            st.write("Hourly prices (€/kWh):")
             st.line_chart(df_hourly)
 
-            # Build 24h profile
-            hourly_24 = df_hourly.groupby(df_hourly.index.hour).mean()
+            avg24 = df_hourly.groupby(df_hourly.index.hour).mean()
+            st.write("24h profile:")
+            st.bar_chart(avg24)
 
-            st.write("### 24-hour average profile (€/kWh):")
-            st.bar_chart(hourly_24)
+            year = st.number_input("Assign year", 2000, 2100, value=2023)
 
-            year_to_save = st.number_input(
-                "Select year to assign this dataset to",
-                min_value=2000,
-                max_value=2100,
-                value=2023,
-                step=1
-            )
+            if st.button("Save cleaned data"):
+                name = "da" if upload_type.startswith("Day") else "id"
+                out = DATA_DIR / f"{name}_{year}.csv"
+                df[["datetime","price_eur_mwh"]].to_csv(out, index=False)
+                st.success(f"Saved to {out}")
 
-            if st.button("💾 Save cleaned data to /data folder"):
-                save_name = "da" if upload_type.startswith("Day") else "id"
-                out_file = DATA_DIR / f"{save_name}_{year_to_save}.csv"
-
-                df_clean = df[["datetime", "price_eur_mwh"]].copy()
-                df_clean.to_csv(out_file, index=False)
-
-                st.success(f"Saved cleaned file as {out_file}")
-
-    st.subheader("3. Existing Historical Price Files in /data")
-    price_files = list(DATA_DIR.glob("*.csv"))
-    if not price_files:
-        st.info("No historical price files found yet.")
-    else:
-        for f in price_files:
-            st.write(f"- {f.name}")
-
-    st.subheader("4. Tips to get high-quality data")
-    st.markdown("""
-    - Best source: **ENTSO-E Transparency Platform**  
-      https://transparency.entsoe.eu  
-
-    - Download **Day-Ahead Prices** and **Intraday Prices**  
-      for area: **DE-LU** (Germany).
-
-    - Resolution can be 60min or 15min.  
-      The Price Manager auto-resamples to hourly.
-
-    - Units: ENTSO-E gives **€/MWh**.  
-      We convert to **€/kWh** automatically.
-
-    - Once saved into `/data`, the EV Optimizer can use these prices
-      via the **Built-in historical (data/…csv)** source.
-    """
-)
+    st.subheader("Available historical data:")
+    for f in DATA_DIR.glob("*.csv"):
+        st.write("-", f.name)
