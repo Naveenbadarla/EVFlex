@@ -3,10 +3,9 @@ import pandas as pd
 import numpy as np
 import altair as alt
 from pathlib import Path
-import io
 
 st.set_page_config(
-    page_title="EV Hourly Optimizer (DA + ID + Retail Markup)",
+    page_title="EV Hourly Optimizer (Simplified)",
     layout="wide"
 )
 
@@ -37,6 +36,7 @@ def load_clean_price_csv(source) -> pd.Series:
     df["datetime"] = pd.to_datetime(df["datetime"])
     df = df.sort_values("datetime")
 
+    # €/MWh → €/kWh
     df["price_eur_kwh"] = df[price_col] / 1000.0
     return df.set_index("datetime")["price_eur_kwh"]
 
@@ -54,7 +54,7 @@ def hourly_profile_from_series(series: pd.Series) -> np.ndarray:
     return hourly.values
 
 
-def synthetic_da_id_profiles():
+def synthetic_da_id_profiles() -> tuple[np.ndarray, np.ndarray]:
     """
     Simple synthetic 24h DA and ID price profiles in €/kWh
     as a fallback.
@@ -102,7 +102,7 @@ def get_da_id_profiles(price_source, year, da_file, id_file):
 # EV OPTIMISATION UTILITIES
 # ============================================================
 
-def allowed_hours_array(arrival_hour, departure_hour):
+def allowed_hours_array(arrival_hour: int, departure_hour: int) -> np.ndarray:
     """
     Boolean array (length 24) indicating when the EV is connected.
     """
@@ -116,7 +116,10 @@ def allowed_hours_array(arrival_hour, departure_hour):
     return allowed
 
 
-def optimise_charging(cost_curve, allowed, session_kwh, charger_power):
+def optimise_charging(cost_curve: np.ndarray,
+                      allowed: np.ndarray,
+                      session_kwh: float,
+                      charger_power: float) -> np.ndarray:
     """
     Greedy cheapest-hour optimisation for a single day.
     cost_curve: €/kWh for each hour 0..23.
@@ -127,6 +130,7 @@ def optimise_charging(cost_curve, allowed, session_kwh, charger_power):
     charge = np.zeros(24)
     remaining = session_kwh
 
+    # Only allowed hours, sorted by cost
     cheap_hours = sorted(
         [h for h in range(24) if allowed[h]],
         key=lambda h: cost_curve[h]
@@ -142,12 +146,12 @@ def optimise_charging(cost_curve, allowed, session_kwh, charger_power):
     return charge
 
 
-def session_cost(charge, retail_curve):
+def session_cost(charge: np.ndarray, retail_curve: np.ndarray) -> float:
     """
     Cost = Σ charge[h] * retail_price[h].
     """
     return float(np.sum(charge * retail_curve))
-# ============================================================
+    # ============================================================
 # NAVIGATION
 # ============================================================
 
@@ -161,25 +165,18 @@ page = st.sidebar.radio("Select page", ["EV Optimizer", "Price Manager"])
 
 if page == "EV Optimizer":
 
-    st.sidebar.title("🚗 EV Hourly Optimizer")
+    st.sidebar.title("🚗 EV Hourly Optimizer (Simplified)")
 
     # -----------------------------
-    # EV INPUTS
+    # BASIC EV PARAMETERS
     # -----------------------------
-    ev_annual_kwh = st.sidebar.number_input(
-        "EV annual need (kWh/year)",
-        min_value=0.0, value=2000.0, step=100.0
-    )
-
     charger_power = st.sidebar.number_input(
         "Charger power (kW)",
         min_value=1.0, max_value=22.0,
         value=11.0, step=1.0
     )
 
-    # -----------------------------
-    # CHARGING FREQUENCY
-    # -----------------------------
+    # Charging frequency (sessions/year)
     freq_choice = st.sidebar.selectbox(
         "Charging frequency",
         [
@@ -206,27 +203,11 @@ if page == "EV Optimizer":
     else:
         sessions_per_year = custom_days * 52
 
-    default_session_kwh = (
-        ev_annual_kwh / sessions_per_year if sessions_per_year > 0 else 0.0
-    )
-
-    session_kwh = st.sidebar.number_input(
-        "kWh per charging session",
-        min_value=0.0, max_value=200.0,
-        value=float(round(default_session_kwh, 2)),
-        step=0.1,
-        help="Energy the EV needs each time it is plugged in."
-    )
-
-    # -----------------------------
-    # ARRIVAL / DEPARTURE WINDOW
-    # -----------------------------
+    # Arrival / departure window
     arrival_hour = st.sidebar.slider("Arrival hour", 0, 23, 18)
     departure_hour = st.sidebar.slider("Departure hour", 0, 23, 7)
 
-    # -----------------------------
-    # BASELINE FLAT RETAIL PRICE
-    # -----------------------------
+    # Baseline flat retail price
     energy_flat = st.sidebar.number_input(
         "Flat retail price (€/kWh)",
         min_value=0.01, max_value=1.00,
@@ -235,9 +216,55 @@ if page == "EV Optimizer":
     )
 
     # -----------------------------
+    # CHARGING ENERGY METHOD
+    # -----------------------------
+    st.sidebar.markdown("### Charging energy method")
+
+    energy_method = st.sidebar.radio(
+        "How to define charged energy per session?",
+        ["SOC-based charging", "Manual kWh per session"]
+    )
+
+    # Placeholder; will be set below
+    session_kwh = 0.0
+
+    if energy_method == "SOC-based charging":
+        battery_capacity = st.sidebar.number_input(
+            "EV battery capacity (kWh)",
+            min_value=10.0, max_value=200.0,
+            value=60.0, step=1.0
+        )
+
+        arrival_soc = st.sidebar.slider(
+            "Arrival SOC (%)", min_value=0, max_value=100,
+            value=30, step=1
+        )
+        target_soc = st.sidebar.slider(
+            "Target SOC at departure (%)", min_value=0, max_value=100,
+            value=80, step=1
+        )
+
+        if target_soc < arrival_soc:
+            st.sidebar.warning("Target SOC is below arrival SOC → no charging needed.")
+            required_kwh = 0.0
+        else:
+            required_kwh = battery_capacity * (target_soc - arrival_soc) / 100.0
+
+        session_kwh = required_kwh
+
+    else:
+        # Manual kWh per session
+        session_kwh = st.sidebar.number_input(
+            "kWh per charging session (manual)",
+            min_value=0.0, max_value=200.0,
+            value=20.0, step=0.5,
+            help="Energy to charge each time the car is plugged in."
+        )
+
+    # -----------------------------
     # PRICE SOURCE SELECTION
     # -----------------------------
-    st.sidebar.markdown("### Price data source")
+    st.sidebar.markdown("### Wholesale DA & ID price source")
 
     price_source = st.sidebar.radio(
         "Source",
@@ -260,17 +287,17 @@ if page == "EV Optimizer":
         id_file = st.sidebar.file_uploader("Upload ID CSV", type=["csv"])
 
     # -----------------------------
-    # ID FLEXIBILITY
+    # ID FLEXIBILITY (for smart DA+ID scenario)
     # -----------------------------
     id_flex_share = st.sidebar.slider(
         "ID flexibility share",
         min_value=0.0, max_value=1.0,
         value=0.5, step=0.05,
-        help="Fraction of charging that can exploit ID discounts."
+        help="Fraction of charging that can exploit intraday (ID) discounts."
     )
 
     # -----------------------------
-    # RETAIL MARKUP
+    # RETAIL MARKUP (grid fees + taxes)
     # -----------------------------
     st.sidebar.markdown("### Retail markup (grid fees + taxes)")
 
@@ -278,70 +305,69 @@ if page == "EV Optimizer":
         "Markup (€/kWh)",
         min_value=0.00, max_value=1.00,
         value=0.12, step=0.01,
-        help="Typical DE total markup ≈ 0.10–0.16 €/kWh."
+        help="All non-energy components (grid fees, taxes, levies, margin)."
     )
-
-    # ============================================================
+        # ============================================================
     # LOAD WHOLESALE PRICES (DA & ID)
     # ============================================================
     da_24, id_24 = get_da_id_profiles(
         price_source, year, da_file, id_file
     )
 
-    # Compute ID discount effect
+    # Compute ID discount effect (only in smart DA+ID scenario)
     id_discount = np.clip(da_24 - id_24, 0, None)
     effective_da_id = da_24 - id_discount * id_flex_share
 
-    # Allowed hours
+    # ============================================================
+    # ALLOWED HOURS WINDOW
+    # ============================================================
     allowed = allowed_hours_array(arrival_hour, departure_hour)
-    available_hours = allowed.sum()
-    max_kwh = available_hours * charger_power
+    available_hours = allowed.sum()  # number of hours EV is home
+    max_possible_kwh = available_hours * charger_power
 
-    if session_kwh > max_kwh:
+    # Safety: limit session_kwh to max possible
+    if session_kwh > max_possible_kwh:
         st.sidebar.warning(
-            f"Requested {session_kwh:.2f} kWh/session exceeds max possible "
-            f"{max_kwh:.2f} kWh → capping."
+            f"Requested charge {session_kwh:.1f} kWh exceeds "
+            f"maximum possible {max_possible_kwh:.1f} kWh "
+            f"in the arrival→departure window. "
+            "Capping it to the maximum possible."
         )
-        session_kwh = max_kwh
+        session_kwh = max_possible_kwh
 
     # ============================================================
-    # PRICE CURVES (WHOLESALE + RETAIL)
+    # PRICE CURVES FOR BILLING
     # ============================================================
+    # Baseline uses a flat retail price
+    baseline_curve = np.full(24, energy_flat)
 
-    # Retail DA-indexed tariff (no smart scheduling)
+    # Retail DA-indexed tariff (DA + markup)
     da_indexed_curve = da_24 + da_retail_markup
 
-    # Retail DA+ID indexed (no smart scheduling)
-    da_id_indexed_curve = effective_da_id + da_retail_markup
-
-    # Wholesale curves for scheduling logic
-    wholesale_da_curve = da_24
-    wholesale_da_id_curve = effective_da_id
-
-    # Retail curves for billing in smart scenarios
-    retail_da_curve = wholesale_da_curve + da_retail_markup
-    retail_da_id_curve = wholesale_da_id_curve + da_retail_markup
+    # Smart scheduling uses wholesale curves, but billing uses retail
+    retail_da_curve = da_24 + da_retail_markup
+    retail_da_id_curve = effective_da_id + da_retail_markup
 
     # ============================================================
-    # CHARGING PROFILES (PHYSICAL BEHAVIOR)
+    # CHARGING PROFILES (PHYSICAL SCHEDULING)
     # ============================================================
 
-    # Baseline (flat retail, no shifting)
-    baseline_curve = np.full(24, energy_flat)
+    # Baseline (flat retail; no optimisation)
     charge_baseline = optimise_charging(
         baseline_curve, allowed, session_kwh, charger_power
     )
 
-    # Retail DA & DA+ID tariffs — same behaviour as baseline
+    # Retail DA-indexed tariff → behaves like baseline (same charging pattern)
     charge_da_indexed = charge_baseline.copy()
-    charge_da_id_indexed = charge_baseline.copy()
 
-    # Smart scheduling using wholesale prices
-    charge_da_only = optimise_charging(
-        wholesale_da_curve, allowed, session_kwh, charger_power
+    # Smart DA optimisation → schedule using DA wholesale
+    charge_smart_da = optimise_charging(
+        da_24, allowed, session_kwh, charger_power
     )
-    charge_full = optimise_charging(
-        wholesale_da_id_curve, allowed, session_kwh, charger_power
+
+    # Smart DA+ID optimisation → schedule using DA+ID wholesale
+    charge_smart_full = optimise_charging(
+        effective_da_id, allowed, session_kwh, charger_power
     )
 
     # ============================================================
@@ -350,16 +376,11 @@ if page == "EV Optimizer":
 
     session_cost_baseline = session_cost(charge_baseline, baseline_curve)
     session_cost_da_indexed = session_cost(charge_da_indexed, da_indexed_curve)
-    session_cost_da_id_indexed = session_cost(charge_da_id_indexed, da_id_indexed_curve)
+    session_cost_smart_da = session_cost(charge_smart_da, retail_da_curve)
+    session_cost_smart_full = session_cost(charge_smart_full, retail_da_id_curve)
 
-    # Smart optimisation billing uses retail curves, not wholesale
-    session_cost_smart_da = session_cost(charge_da_only, retail_da_curve)
-    session_cost_smart_full = session_cost(charge_full, retail_da_id_curve)
-
-    # Annual costs = cost/session × sessions/year
     annual_baseline = session_cost_baseline * sessions_per_year
     annual_da_indexed = session_cost_da_indexed * sessions_per_year
-    annual_da_id_indexed = session_cost_da_id_indexed * sessions_per_year
     annual_smart_da = session_cost_smart_da * sessions_per_year
     annual_smart_full = session_cost_smart_full * sessions_per_year
 
@@ -368,29 +389,30 @@ if page == "EV Optimizer":
     def eff_price(annual_cost):
         return annual_cost / total_kwh_year if total_kwh_year > 0 else 0.0
 
-
     # ============================================================
-    # MAIN OUTPUT BLOCK
+    # MAIN OUTPUT SUMMARY
     # ============================================================
 
-    st.title("🚗 EV Hourly Optimizer (Wholesale Scheduling + Retail Billing)")
+    st.title("🚗 EV Hourly Optimizer (Simplified)")
 
     st.markdown(
         f"**Sessions/year:** {sessions_per_year:.1f}  \n"
-        f"**kWh/session:** {session_kwh:.2f}  \n"
-        f"**Total kWh/year:** {total_kwh_year:.0f}  \n"
-        f"**Arrival–Departure:** {arrival_hour:02d}:00 → {departure_hour:02d}:00  \n"
-        f"**Retail markup:** {da_retail_markup:.3f} €/kWh"
+        f"**Charged energy per session:** {session_kwh:.2f} kWh  \n"
+        f"**Total annual charging energy:** {total_kwh_year:.0f} kWh  \n"
+        f"**Arrival → Departure:** {arrival_hour:02d}:00 → {departure_hour:02d}:00  \n"
+        f"**Retail markup:** {da_retail_markup:.2f} €/kWh"
     )
 
-    # Summary table
+    # ============================================================
+    # RESULTS TABLE
+    # ============================================================
+
     results_df = pd.DataFrame([
         ["Baseline (flat retail)", annual_baseline, eff_price(annual_baseline)],
-        ["Retail DA-indexed (no shifting)", annual_da_indexed, eff_price(annual_da_indexed)],
-        ["Retail DA+ID-indexed (no shifting)", annual_da_id_indexed, eff_price(annual_da_id_indexed)],
-        ["Smart DA (wholesale scheduling + retail billing)", annual_smart_da, eff_price(annual_smart_da)],
-        ["Smart DA+ID (wholesale scheduling + retail billing)", annual_smart_full, eff_price(annual_smart_full)],
-    ], columns=["Scenario", "Annual Cost (€)", "Eff. Price (€/kWh)"])
+        ["Retail DA-indexed tariff", annual_da_indexed, eff_price(annual_da_indexed)],
+        ["Smart DA optimisation", annual_smart_da, eff_price(annual_smart_da)],
+        ["Smart DA+ID optimisation", annual_smart_full, eff_price(annual_smart_full)],
+    ], columns=["Scenario", "Annual Cost (€)", "Effective price (€/kWh)"])
 
     best = results_df.loc[results_df["Annual Cost (€)"].idxmin()]
 
@@ -398,19 +420,19 @@ if page == "EV Optimizer":
     st.dataframe(
         results_df.style.format({
             "Annual Cost (€)": "{:.0f}",
-            "Eff. Price (€/kWh)": "{:.3f}"
+            "Effective price (€/kWh)": "{:.3f}"
         }),
         use_container_width=True
     )
 
     st.success(
-        f"**Best scenario:** {best['Scenario']}  → "
-        f"**{best['Annual Cost (€)']:.0f} € / year**, "
-        f"**{best['Eff. Price (€/kWh)']:.3f} €/kWh**."
+        f"**Best scenario:** {best['Scenario']} → "
+        f"**{best['Annual Cost (€)']:.0f} € per year** "
+        f"({best['Effective price (€/kWh)']:.3f} €/kWh)"
     )
 
     # ============================================================
-    # COST BAR CHART
+    # COST COMPARISON BAR CHART
     # ============================================================
 
     st.subheader("Cost Comparison (Bar Chart)")
@@ -423,16 +445,16 @@ if page == "EV Optimizer":
             y=alt.Y("Annual Cost (€):Q"),
             tooltip=[
                 "Scenario",
-                alt.Tooltip("Annual Cost (€):Q", format=".0f")
+                alt.Tooltip("Annual Cost (€):Q", format=".0f"),
+                alt.Tooltip("Effective price (€/kWh):Q", format=".3f")
             ]
         )
-        .properties(height=300)
+        .properties(height=330)
     )
 
     st.altair_chart(cost_chart, use_container_width=True)
-
-    # ============================================================
-    # CHARGING HEATMAP (ARRIVAL → DEPARTURE WINDOW)
+        # ============================================================
+    # SIMPLE CHARGING PATTERN (ONLY ONE CHART)
     # ============================================================
 
     st.subheader("🔌 Charging Pattern (Arrival → Departure Window)")
@@ -442,220 +464,46 @@ if page == "EV Optimizer":
     end = departure_hour if departure_hour > arrival_hour else departure_hour + 24
 
     hours_window = list(range(start, end))
-    hours_mod = [h % 24 for h in hours_window]
+    hours_mod = [h % 24 for h in hours_window]  # for display
 
-    charge_window_df = pd.DataFrame({
+    charging_pattern_df = pd.DataFrame({
         "Hour": hours_mod,
-        "Baseline": [charge_baseline[h % 24] for h in hours_window],
-        "Smart DA": [charge_da_only[h % 24] for h in hours_window],
-        "Smart DA+ID": [charge_full[h % 24] for h in hours_window],
+        "Baseline (kWh)": [charge_baseline[h % 24] for h in hours_window],
+        "DA-indexed (kWh)": [charge_da_indexed[h % 24] for h in hours_window],
+        "Smart DA (kWh)": [charge_smart_da[h % 24] for h in hours_window],
+        "Smart DA+ID (kWh)": [charge_smart_full[h % 24] for h in hours_window],
     })
 
-    charge_window_long = charge_window_df.melt(
-        "Hour", var_name="Scenario", value_name="kWh"
-    )
-
-    charge_heat = (
-        alt.Chart(charge_window_long)
-        .mark_rect()
-        .encode(
-            x=alt.X("Hour:O", title="Hour"),
-            y=alt.Y("Scenario:N", title="Scenario"),
-            color=alt.Color("kWh:Q", scale=alt.Scale(scheme="blues"), title="kWh"),
-            tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")]
-        )
-        .properties(height=200)
-    )
-
-    st.altair_chart(charge_heat, use_container_width=True)
-
-    # ============================================================
-    # PRICE HEATMAP (ARRIVAL → DEPARTURE WINDOW)
-    # ============================================================
-
-    st.subheader("💶 Wholesale Price Pattern (DA & DA+ID) in Window")
-
-    price_window_df = pd.DataFrame({
-        "Hour": hours_mod,
-        "DA Price (€/kWh)": [da_24[h % 24] for h in hours_window],
-        "DA+ID Price (€/kWh)": [effective_da_id[h % 24] for h in hours_window],
-    })
-
-    price_window_long = price_window_df.melt(
-        "Hour", var_name="Price Type", value_name="Price €/kWh"
-    )
-
-    price_heat = (
-        alt.Chart(price_window_long)
-        .mark_rect()
-        .encode(
-            x=alt.X("Hour:O"),
-            y=alt.Y("Price Type:N"),
-            color=alt.Color("Price €/kWh:Q", scale=alt.Scale(scheme="reds")),
-            tooltip=["Price Type", "Hour", alt.Tooltip("Price €/kWh:Q", format=".3f")]
-        )
-        .properties(height=150)
-    )
-
-    st.altair_chart(price_heat, use_container_width=True)
-    # ============================================================
-    # CHARGING LINE CHART (FULL 24 HOURS)
-    # ============================================================
-
-    st.subheader("📊 Charging per Hour (Full 24h)")
-
-    charge_24_df = pd.DataFrame({
-        "Hour": list(range(24)),
-        "Baseline": charge_baseline,
-        "Smart DA": charge_da_only,
-        "Smart DA+ID": charge_full,
-    })
-
-    charge_24_long = charge_24_df.melt(
-        "Hour", var_name="Scenario", value_name="kWh"
-    )
-
-    charge_line = (
-        alt.Chart(charge_24_long)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("Hour:O", title="Hour"),
-            y=alt.Y("kWh:Q", title="Charging (kWh)"),
-            color="Scenario:N",
-            tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")],
-        )
-        .properties(height=250)
-    )
-
-    st.altair_chart(charge_line, use_container_width=True)
-
-    # ============================================================
-    # PRICE LINE CHART (FULL 24 HOURS)
-    # ============================================================
-
-    st.subheader("📈 Wholesale Price Curves (Full 24h)")
-
-    price_24_df = pd.DataFrame({
-        "Hour": list(range(24)),
-        "DA Price (€/kWh)": da_24,
-        "DA+ID Price (€/kWh)": effective_da_id,
-    })
-
-    price_24_long = price_24_df.melt(
-        "Hour", var_name="Price Type", value_name="Price €/kWh"
-    )
-
-    price_line = (
-        alt.Chart(price_24_long)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("Hour:O"),
-            y=alt.Y("Price €/kWh:Q", title="Price (€/kWh)"),
-            color="Price Type:N",
-            tooltip=["Price Type", "Hour", alt.Tooltip("Price €/kWh:Q", format=".3f")],
-        )
-        .properties(height=250)
-    )
-
-    st.altair_chart(price_line, use_container_width=True)
-
-    # ============================================================
-    # 🔥 OVERLAY: CHARGING (kWh) + PRICE (€/kWh) WITH DUAL-AXIS
-    # ============================================================
-
-    st.subheader("🔄 Overlay: Charging vs Price (Full 24 Hours)")
-
-    overlay_df = pd.DataFrame({
-        "Hour": list(range(24)),
-        "Baseline Charge (kWh)": charge_baseline,
-        "Smart DA Charge (kWh)": charge_da_only,
-        "Smart DA+ID Charge (kWh)": charge_full,
-        "DA Price (€/kWh)": da_24,
-        "DA+ID Price (€/kWh)": effective_da_id,
-    })
-
-    # Melt charging data
-    charge_melt = overlay_df.melt(
-        id_vars="Hour",
-        value_vars=[
-            "Baseline Charge (kWh)",
-            "Smart DA Charge (kWh)",
-            "Smart DA+ID Charge (kWh)"
-        ],
+    charging_long = charging_pattern_df.melt(
+        "Hour",
         var_name="Scenario",
         value_name="kWh"
     )
 
-    # Melt price data
-    price_melt = overlay_df.melt(
-        id_vars="Hour",
-        value_vars=["DA Price (€/kWh)", "DA+ID Price (€/kWh)"],
-        var_name="Price Type",
-        value_name="Price"
-    )
-
-    charging_lines = (
-        alt.Chart(charge_melt)
-        .mark_line(point=True)
+    charging_chart = (
+        alt.Chart(charging_long)
+        .mark_bar()
         .encode(
-            x="Hour:O",
-            y=alt.Y("kWh:Q", axis=alt.Axis(title="Charging (kWh)")),
+            x=alt.X("Hour:O", title="Hour of Day"),
+            y=alt.Y("kWh:Q", title="Charging (kWh)"),
             color="Scenario:N",
-            tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")],
+            tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")]
         )
+        .properties(height=350)
     )
 
-    price_lines = (
-        alt.Chart(price_melt)
-        .mark_line(point=True, strokeDash=[4, 3])
-        .encode(
-            x="Hour:O",
-            y=alt.Y(
-                "Price:Q",
-                axis=alt.Axis(title="Price (€/kWh)", grid=False),
-                scale=alt.Scale(zero=False)
-            ),
-            color="Price Type:N",
-            tooltip=["Price Type", "Hour", alt.Tooltip("Price:Q", format=".3f")],
-        )
-    )
-
-    combined_overlay = alt.layer(charging_lines, price_lines).resolve_scale(
-        y="independent"
-    )
-
-    st.altair_chart(combined_overlay, use_container_width=True)
-
-    # ============================================================
-    # CSV DOWNLOAD BUTTONS
-    # ============================================================
-
-    st.subheader("📥 Download Data")
-
-    # Charging schedule CSV (24h)
-    charge_csv = charge_24_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download charging schedule (24h CSV)",
-        data=charge_csv,
-        file_name="ev_charging_schedule_24h.csv",
-        mime="text/csv",
-    )
-
-    # Price curves CSV (24h)
-    price_csv = price_24_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download wholesale price curves (24h CSV)",
-        data=price_csv,
-        file_name="wholesale_prices_24h.csv",
-        mime="text/csv",
-    )
+    st.altair_chart(charging_chart, use_container_width=True)
 
     st.markdown(
         """
-        **Interpretation hints:**  
-        - Charging heatmap shows exactly when EV charges inside the connection window.  
-        - Overlay chart shows how smart charging shifts into low-price hours.  
-        - Retail costs (markup included) appear in the annual comparison table.  
+        **How to interpret this:**
+
+        - Only hours between arrival and departure are shown.
+        - Each scenario distributes the required energy differently:
+            - Baseline → equal or early charging (flat price)
+            - DA-indexed → same pattern as baseline
+            - Smart DA → shifts charging into lowest DA-price hours
+            - Smart DA+ID → shifts charging even more into DA+ID dips
         """
     )
     # ============================================================
@@ -664,15 +512,20 @@ if page == "EV Optimizer":
 
 if page == "Price Manager":
 
-    st.title("📈 Price Manager – DA/ID Data Cleaner & Loader")
+    st.title("📈 Price Manager – DA/ID Data Loader (Simplified)")
 
     st.markdown(
-        "Upload raw ENTSO-E (or similar) CSV files,\n"
-        "the tool will clean, convert, visualise, and save them into `/data`.\n\n"
-        "**Supported formats:**\n"
-        "- ENTSO-E Day Ahead Prices (€/MWh)\n"
-        "- ENTSO-E Intraday Prices (€/MWh)\n"
-        "- Any CSV with columns (datetime, price)\n"
+        """
+        Upload raw ENTSO-E or compatible CSV files containing wholesale prices.
+        This page will:
+
+        - Parse and clean the datetime column  
+        - Convert €/MWh → €/kWh  
+        - Resample to hourly  
+        - Save as `data/da_YEAR.csv` or `data/id_YEAR.csv`  
+
+        No charts are shown here (simplified view).
+        """
     )
 
     # ----------------------------------
@@ -686,13 +539,12 @@ if page == "Price Manager":
     raw_file = st.file_uploader(
         "Upload raw price CSV",
         type=["csv"],
-        help="Upload your ENTSO-E or compatible price file."
+        help="Upload ENTSO-E or similar DA/ID CSV."
     )
 
     if raw_file is not None:
 
         df_raw = pd.read_csv(raw_file)
-
         st.subheader("🔍 Raw file preview")
         st.dataframe(df_raw.head(), use_container_width=True)
 
@@ -716,8 +568,8 @@ if page == "Price Manager":
 
         if dt_col is None or price_col is None:
             st.error(
-                "❌ Unable to auto-detect datetime or price columns.\n"
-                "Please rename columns or clean file manually."
+                "❌ Could not detect datetime or price columns automatically.\n"
+                "Please ensure columns contain 'MTU', 'date', 'time', 'price', or 'MWh'."
             )
 
         else:
@@ -725,14 +577,14 @@ if page == "Price Manager":
             st.success(f"Detected price column: **{price_col}**")
 
             # ----------------------------------
-            # CLEAN + PARSE DATETIME
+            # CLEAN & PARSE DATETIME
             # ----------------------------------
             df = df_raw[[dt_col, price_col]].copy()
 
             try:
-                # ENTSO-E format: "2023-01-01 00:00 - 01:00"
-                cleaned_dt = df[dt_col].astype(str).str.split("-").str[0].str.strip()
-                df["datetime"] = pd.to_datetime(cleaned_dt)
+                # ENTSO-E style: "2023-01-01 00:00 - 01:00"
+                dt_clean = df[dt_col].astype(str).str.split("-").str[0].str.strip()
+                df["datetime"] = pd.to_datetime(dt_clean)
             except Exception:
                 df["datetime"] = pd.to_datetime(df[dt_col], errors="coerce")
 
@@ -748,20 +600,10 @@ if page == "Price Manager":
             df_hourly = (
                 df.set_index("datetime")["price_eur_mwh"]
                 .resample("1H")
-                .mean() / 1000.0  # --> €/kWh
+                .mean() / 1000.0
             )
+
             df_hourly = df_hourly.dropna()
-
-            st.subheader("📉 Hourly price series (€/kWh)")
-            st.line_chart(df_hourly)
-
-            # ----------------------------------
-            # 24-HOUR AVERAGE PROFILE
-            # ----------------------------------
-            avg24 = df_hourly.groupby(df_hourly.index.hour).mean()
-
-            st.subheader("⏰ Average 24h profile (€/kWh)")
-            st.bar_chart(avg24)
 
             # ----------------------------------
             # SAVE CLEANED DATA TO /data
@@ -772,17 +614,19 @@ if page == "Price Manager":
                 value=2023, step=1
             )
 
-            if st.button("💾 Save cleaned data to /data"):
+            if st.button("💾 Save cleaned data to /data folder"):
                 name = "da" if upload_type.startswith("Day") else "id"
                 out_path = DATA_DIR / f"{name}_{int(year_save)}.csv"
+
+                # Save original-style cleaned data (€/MWh)
                 df[["datetime", "price_eur_mwh"]].to_csv(out_path, index=False)
 
                 st.success(f"Saved cleaned file to: `{out_path}`")
 
     # ----------------------------------
-    # SHOW EXISTING FILES
+    # SHOW EXISTING CLEANED FILES
     # ----------------------------------
-    st.subheader("📂 Existing historical price files in `/data`")
+    st.subheader("📂 Existing historical files in /data")
 
     files = list(DATA_DIR.glob("*.csv"))
     if not files:
@@ -791,47 +635,7 @@ if page == "Price Manager":
         for f in files:
             st.write("•", f.name)
 
-    st.markdown(
-        """
-        **Tips for high-quality DA/ID data:**
 
-        - Best source: ENTSO-E Transparency Platform  
-          https://transparency.entsoe.eu
-
-        - Select area: **DE-LU (Germany/Luxembourg)**  
-        - Units: **€/MWh**  
-        - Time resolution: **60 min or 15 min** (both supported)  
-        - The Price Manager converts everything to **hourly €/kWh**.  
-        - Saved files can be selected in the *EV Optimizer → Built-in historical* mode.
-        """
-    )
-# ============================================================
-# END OF PRICE MANAGER PAGE
-# ============================================================
-
-    # (End of Price Manager block)
-# ============================================================
-# OPTIONAL FOOTER & VERSION INFO
-# ============================================================
-
-def app_footer():
-    st.markdown(
-        """
-        <hr>
-
-        <div style="font-size:13px; color:#666; text-align:center;">
-        EV Hourly Optimizer – DA + ID + Retail Markup Model  
-        <br>
-        Built with Streamlit · Altair · NumPy · Pandas  
-        <br><br>
-        Version: 1.0.0  
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-# Display footer
-app_footer()
 
 
 
