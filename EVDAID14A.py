@@ -233,7 +233,7 @@ if page == "EV Optimizer":
     energy_flat = st.sidebar.number_input(
         "Flat retail energy price (€/kWh)",
         min_value=0.01, value=0.30, step=0.01,
-        help="Average retail price you pay without DA/ID optimisation."
+        help="Average retail price you pay without optimisation."
     )
 
     st.sidebar.markdown("---")
@@ -266,6 +266,14 @@ if page == "EV Optimizer":
         help="0 = ignore ID, 1 = all DA-chosen charging can be price-improved by ID."
     )
 
+    st.sidebar.markdown("### Dynamic retail DA tariff")
+
+    da_retail_markup = st.sidebar.number_input(
+        "Retail DA markup (€/kWh)",
+        min_value=0.0, value=0.03, step=0.01,
+        help="Extra margin on top of wholesale DA/ID for a dynamic retail tariff."
+    )
+
     # LOAD PRICES (24h DA & ID)
     da_24, id_24 = get_da_id_profiles(price_source, year, da_file, id_file)
 
@@ -288,26 +296,46 @@ if page == "EV Optimizer":
         session_kwh = max_possible_kwh
 
     # COST CURVES PER SCENARIO (€/kWh)
-    # 1) Baseline: flat retail price
+
+    # 1) Baseline: flat retail price (no DA/ID)
     baseline_curve = np.full(24, energy_flat)
 
-    # 2) DA only: DA curve (assumed effective energy price)
+    # 2) Retail DA-indexed tariff: DA + markup, no smart scheduling
+    da_indexed_curve = da_24 + da_retail_markup
+
+    # 3) Retail DA+ID-indexed tariff: DA+ID + markup, no smart scheduling
+    da_id_indexed_curve = effective_da_id + da_retail_markup
+
+    # 4) Smart DA: DA curve (wholesale)
     da_only_curve = da_24
 
-    # 3) DA + ID: effective DA+ID curve
+    # 5) Smart DA+ID: effective DA+ID curve (wholesale)
     full_curve = effective_da_id
 
     # OPTIMISE DAILY CHARGING PROFILES
+
+    # Baseline schedule (same hours regardless of price)
     charge_baseline = optimise_charging(baseline_curve, allowed, session_kwh, charger_power)
+
+    # Retail DA/DA+ID tariffs use same baseline schedule (no smart shifting)
+    charge_da_indexed = charge_baseline.copy()
+    charge_da_id_indexed = charge_baseline.copy()
+
+    # Smart wholesale DA and DA+ID use price-optimised schedules
     charge_da_only = optimise_charging(da_only_curve, allowed, session_kwh, charger_power)
     charge_full = optimise_charging(full_curve, allowed, session_kwh, charger_power)
 
     # COST PER SESSION & PER YEAR
+
     session_cost_baseline = session_cost(charge_baseline, baseline_curve)
+    session_cost_da_indexed = session_cost(charge_da_indexed, da_indexed_curve)
+    session_cost_da_id_indexed = session_cost(charge_da_id_indexed, da_id_indexed_curve)
     session_cost_da_only = session_cost(charge_da_only, da_only_curve)
     session_cost_full = session_cost(charge_full, full_curve)
 
     annual_baseline = session_cost_baseline * sessions_per_year
+    annual_da_indexed = session_cost_da_indexed * sessions_per_year
+    annual_da_id_indexed = session_cost_da_id_indexed * sessions_per_year
     annual_da = session_cost_da_only * sessions_per_year
     annual_full = session_cost_full * sessions_per_year
 
@@ -317,20 +345,23 @@ if page == "EV Optimizer":
         return annual_cost / total_kwh_year if total_kwh_year > 0 else 0.0
 
     # MAIN PAGE OUTPUT
-    st.title("🚗 EV Hourly Charging Optimizer (DA + ID)")
+    st.title("🚗 EV Hourly Charging Optimizer (DA + ID, retail & wholesale)")
 
     st.write(
         f"**Sessions per year:** {sessions_per_year:.1f}  \n"
         f"**kWh per session:** {session_kwh:.2f}  \n"
         f"**Charger power:** {charger_power:.1f} kW  \n"
         f"**Arrival:** {arrival_hour:02d}:00  –  **Departure:** {departure_hour:02d}:00  \n"
-        f"**Price source:** {price_source}"
+        f"**Price source:** {price_source}  \n"
+        f"**Retail DA markup:** {da_retail_markup:.3f} €/kWh"
     )
 
     df = pd.DataFrame([
         ["Baseline (flat retail price)", annual_baseline, eff_price(annual_baseline)],
-        ["DA only", annual_da, eff_price(annual_da)],
-        ["DA + ID (full optimisation)", annual_full, eff_price(annual_full)],
+        ["Retail DA-indexed (no smart scheduling)", annual_da_indexed, eff_price(annual_da_indexed)],
+        ["Retail DA+ID-indexed (no smart scheduling)", annual_da_id_indexed, eff_price(annual_da_id_indexed)],
+        ["Smart DA optimisation (wholesale)", annual_da, eff_price(annual_da)],
+        ["Smart DA+ID optimisation (wholesale)", annual_full, eff_price(annual_full)],
     ], columns=["Scenario", "Annual Cost (€)", "Effective price (€/kWh)"])
 
     best = df.loc[df["Annual Cost (€)"].idxmin()]
@@ -352,9 +383,9 @@ if page == "EV Optimizer":
     # CHARGING SCHEDULE VISUALISATION
     chart_df = pd.DataFrame({
         "Hour": list(range(24)),
-        "Baseline": charge_baseline,
-        "DA only": charge_da_only,
-        "DA + ID": charge_full,
+        "Baseline (flat / retail DA-indexed)": charge_baseline,
+        "Smart DA (wholesale)": charge_da_only,
+        "Smart DA+ID (wholesale)": charge_full,
     })
 
     st.subheader("Charging Schedule per Day (kWh per hour)")
@@ -377,9 +408,10 @@ if page == "EV Optimizer":
     st.markdown(
         """
         **Notes**  
-        * Baseline assumes your flat 'retail' price is what you pay without optimisation.  
-        * DA and DA+ID scenarios use DA/ID price profiles (historical or uploaded) as effective energy prices.  
-        * No grid-fee / §14a logic is included in this version – it's pure energy price optimisation for the EV.
+        * Baseline = flat retail price, no time dependence.  
+        * Retail DA-indexed / DA+ID-indexed = you pay a dynamic tariff (DA or DA+ID + markup), but you **do not** shift by price.  
+        * Smart DA / Smart DA+ID = wholesale optimisation of charging schedule into cheapest hours.  
+        * No grid-fee / §14a logic in this version – this is pure energy price optimisation.
         """
     )
 
@@ -508,4 +540,5 @@ if page == "Price Manager":
 
     - Once saved into `/data`, the EV Optimizer can use these prices
       via the **Built-in historical (data/…csv)** source.
-    """)
+    """
+)
