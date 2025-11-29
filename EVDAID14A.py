@@ -726,7 +726,38 @@ if page == "EV Optimizer (15-min)":
             "_These simulated values account for variability in arrival times "
             "and arrival SOC levels, giving a more realistic picture of annual cost._"
         )
+                # ============================================================
+        # VISUAL 1: Histogram of simulated arrival hours
         # ============================================================
+
+        st.subheader("📊 Distribution of Simulated Arrival Hours")
+
+        arrival_hours_list = []
+
+        # regenerate all arrival hours without recalculating costs
+        for _ in range(n_sim):
+            if arrival_jitter > 0:
+                a = arrival_hour + rng.normal(0, arrival_jitter / 2.0)
+                a = int(np.round(a)) % 24
+            else:
+                a = arrival_hour
+            arrival_hours_list.append(a)
+
+        arrival_df = pd.DataFrame({"ArrivalHour": arrival_hours_list})
+
+        hist_arrival = (
+            alt.Chart(arrival_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("ArrivalHour:O", bin=False, title="Hour of Arrival"),
+                y=alt.Y("count()", title="Frequency")
+            )
+            .properties(height=200)
+        )
+
+        st.altair_chart(hist_arrival, use_container_width=True)
+
+# ============================================================
 # PRICE MANAGER PAGE (15-MIN CLEANER VERSION)
 # ============================================================
 
