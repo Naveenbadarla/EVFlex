@@ -221,10 +221,9 @@ st.markdown(
 )
 
 
-# =============================================================================
-# EV CHARGING ANIMATION – PREMIUM E.ON STYLE
-# =============================================================================
-html_animation = """
+from streamlit.components.v1 import html
+
+html("""
 <style>
 
 .ev-wrapper {
@@ -236,7 +235,7 @@ html_animation = """
 }
 
 .ev-card {
-    background: linear-gradient(145deg, #1e1f22 0%, #25262b 100%);
+    background: linear-gradient(145deg, #1e1f22, #25262b);
     border-radius: 24px;
     padding: 40px 30px;
     width: 95%;
@@ -263,7 +262,6 @@ html_animation = """
     border: 5px solid #8b8b8b;
     position: absolute;
     bottom: -20px;
-    animation: wheelGlow 4s ease-in-out infinite;
 }
 .ev-wheel.left { left: 32px; }
 .ev-wheel.right { right: 32px; }
@@ -277,7 +275,6 @@ html_animation = """
     right: -12px;
     top: 42px;
     box-shadow: 0 0 14px rgba(226,0,15,1);
-    animation: portPulse 1.6s infinite ease-in-out;
 }
 
 .ev-cable {
@@ -309,7 +306,6 @@ html_animation = """
     right: -250px;
     top: -12px;
     border: 1px solid rgba(255,255,255,0.15);
-    box-shadow: 0 0 30px rgba(255,255,255,0.1);
 }
 
 .ev-charger-screen {
@@ -318,24 +314,6 @@ html_animation = """
     background: #E2000F;
     border-radius: 6px;
     margin: 18px auto;
-    animation: screenGlow 2s infinite ease-in-out;
-}
-
-/* Animations */
-
-@keyframes wheelGlow {
-    0%,100% { box-shadow: 0 0 6px rgba(226,0,15,0.6); }
-    50% { box-shadow: 0 0 16px rgba(226,0,15,1); }
-}
-
-@keyframes screenGlow {
-    0%,100% { background: #ff2e2e; opacity: 0.75; }
-    50% { background: #ff5656; opacity: 1; }
-}
-
-@keyframes portPulse {
-    0%,100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.45); opacity: 1; }
 }
 
 @keyframes cablePulse {
@@ -370,9 +348,8 @@ html_animation = """
         </h3>
     </div>
 </div>
-"""
+""", height=350)
 
-st.markdown(html_animation, unsafe_allow_html=True)
 
 
 # =============================================================================
