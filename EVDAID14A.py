@@ -96,7 +96,7 @@ if price_source == "Built-in historical (data/…csv)":
 
     if not da_path.exists() or not id_path.exists():
         st.warning("Missing DA/ID files → using synthetic prices.")
-        return synthetic_da_id_profiles_96()
+    return synthetic_da_id_profiles_96()
 
     da_series = load_price_15min(da_path)
     id_series = load_price_15min(id_path)
