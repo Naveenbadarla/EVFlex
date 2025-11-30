@@ -223,356 +223,133 @@ st.markdown(
 
 from streamlit.components.v1 import html
 
-# Plug in actual model results here: 
-POWER_KW = power              # <- from your sidebar
-
-html(f"""
+html("""
 <style>
 
-body {{
-    overflow-x: hidden;
-}}
-
-.cinema-wrapper {{
+.ev-wrapper {
     width: 100%;
     display: flex;
     justify-content: center;
-    margin-top: 45px;
-    margin-bottom: 45px;
-}}
+    margin-top: 35px;
+    margin-bottom: 40px;
+}
 
-/* Ambient futuristic E.ON garage background */
-.cinema-card {{
-    width: 94%;
-    max-width: 1000px;
-    padding: 60px 45px;
-    background: radial-gradient(circle at 50% 120%, #0c0c11 0%, #050507 70%);
+.ev-card {
+    background: linear-gradient(145deg, #1e1f22, #25262b);
+    border-radius: 24px;
+    padding: 40px 30px;
+    width: 95%;
+    max-width: 900px;
+    box-shadow: 0 10px 45px rgba(0,0,0,0.7);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+
+.ev-car {
+    width: 240px;
+    height: 110px;
     border-radius: 28px;
-    backdrop-filter: blur(30px);
-    border: 1px solid rgba(255,255,255,0.07);
-    box-shadow: 0 0 80px rgba(0,0,0,0.7);
+    background: linear-gradient(180deg, #3a3d42, #2d2f34 80%);
     position: relative;
-    overflow: hidden;
-}}
-
-/* Ambient red E.ON glowing pillars */
-.light-pillar {{
-    position: absolute;
-    width: 140px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(226,0,15,0.5), transparent 70%);
-    filter: blur(35px);
-    opacity: 0.25;
-}}
-
-.light-left {{ left: -60px; top: -80px; }}
-.light-right {{ right: -60px; top: -80px; }}
-
-/* Floor reflection surface */
-.floor-reflection {{
-    position: absolute;
-    bottom: 0;
-    width: 100%;
-    height: 55%;
-    background: linear-gradient(rgba(255,255,255,0.03), transparent);
-    backdrop-filter: blur(12px);
-    z-index: 1;
-}}
-
-/* Car container with cinematic motion blur */
-.tesla-container {{
-    position: relative;
-    width: 500px;
     margin: 0 auto;
-    filter: blur(0px);
-    animation: driveIn 2.8s ease-out forwards;
-}}
+    box-shadow: 0 0 30px rgba(255,0,0,0.25);
+}
 
-@keyframes driveIn {{
-    0% {{
-        transform: translateX(-750px);
-        filter: blur(8px);
-    }}
-    70% {{
-        transform: translateX(20px);
-        filter: blur(2px);
-    }}
-    100% {{
-        transform: translateX(0);
-        filter: blur(0);
-    }}
-}}
-
-/* Tesla body */
-.tesla-body {{
-    width: 500px;
-    height: 140px;
-    background: linear-gradient(180deg,#4e5056,#2d2f33);
-    border-radius: 160px 160px 70px 70px;
-    box-shadow: 0 0 55px rgba(226,0,15,0.3);
-    position: relative;
-    animation: settleBounce 0.7s ease-out 2.8s forwards;
-}}
-
-@keyframes settleBounce {{
-    0% {{ transform: translateY(-10px); }}
-    50% {{ transform: translateY(6px); }}
-    100% {{ transform: translateY(0px); }}
-}}
-
-/* Reflection of the car */
-.tesla-reflection {{
-    width: 500px;
-    height: 140px;
-    border-radius: 160px 160px 70px 70px;
-    background: linear-gradient(180deg,#2d2f33 0%, transparent 70%);
-    opacity: 0.25;
-    position: absolute;
-    top: 150px;
-    transform: scaleY(-1);
-    filter: blur(6px);
-}}
-
-/* Wheels */
-.wheel {{
-    width: 78px;
-    height: 78px;
+.ev-wheel {
+    width: 46px;
+    height: 46px;
     background: #000;
     border-radius: 50%;
-    border: 7px solid #888;
-    position: absolute;
-    bottom: -30px;
-    animation: roll 2.2s linear forwards;
-}}
-
-.left-wheel {{ left: 75px; }}
-.right-wheel {{ right: 75px; }}
-
-@keyframes roll {{
-    0% {{ transform: rotate(0deg); }}
-    100% {{ transform: rotate(520deg); }}
-}}
-
-/* Headlights */
-.headlight {{
-    width: 48px;
-    height: 16px;
-    background: rgba(255,255,255,0.05);
-    border-radius: 5px;
-    position: absolute;
-    top: 43%;
-    transform: translateY(-50%);
-    opacity: 0;
-    animation: lightsOn 1.4s ease-out 2.8s forwards;
-}}
-
-.left-light {{ left: 20px; }}
-.right-light {{ right: 20px; }}
-
-.headlight::after {{
-    content: "";
-    position: absolute;
-    width: 140px;
-    height: 16px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.7), transparent);
-    filter: blur(5px);
-    opacity: 0;
-    animation: beamsOn 1.4s ease-out 2.8s forwards;
-}}
-
-.right-light::after {{
-    transform: rotateY(180deg);
-}}
-
-@keyframes lightsOn {{
-    from {{ opacity: 0; }}
-    to {{ opacity: 1; }}
-}}
-
-@keyframes beamsOn {{
-    from {{ opacity: 0; }}
-    to {{ opacity: 1; }}
-}}
-
-/* Underglow */
-.underglow {{
+    border: 5px solid #8b8b8b;
     position: absolute;
     bottom: -20px;
-    left: 20%;
-    width: 60%;
-    height: 20px;
-    background: radial-gradient(circle, rgba(226,0,15,0.9), transparent 70%);
-    filter: blur(18px);
-    opacity: 0;
-    animation: underglow 1.3s ease-in-out 2.8s forwards;
-}}
+}
+.ev-wheel.left { left: 32px; }
+.ev-wheel.right { right: 32px; }
 
-@keyframes underglow {{
-    from {{ opacity: 0; }}
-    to {{ opacity: 1; }}
-}}
-
-/* Charging port */
-.port {{
-    width: 20px;
-    height: 20px;
+.ev-port {
+    width: 16px;
+    height: 16px;
     background: #E2000F;
     border-radius: 50%;
     position: absolute;
-    right: -14px;
-    top: 50%;
-    transform: translateY(-50%);
-    box-shadow: 0 0 22px rgba(226,0,15,1);
-    opacity: 0;
-    animation: portOn 0.8s ease-in 3.1s forwards;
-}}
+    right: -12px;
+    top: 42px;
+    box-shadow: 0 0 14px rgba(226,0,15,1);
+}
 
-@keyframes portOn {{
-    from {{ opacity: 0; }}
-    to {{ opacity: 1; }}
-}}
-
-/* Cable */
-.cable {{
-    width: {min(240, int(POWER_KW * 14))}px;
+.ev-cable {
+    width: 140px;
     height: 4px;
-    background: rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.25);
     position: absolute;
-    right: -250px;
-    top: 50%;
-    border-radius: 3px;
-    opacity: 0;
-    animation: cableSlide 1s ease-out 3.2s forwards;
-}}
+    right: -140px;
+    top: 50px;
+    border-radius: 2px;
+}
 
-@keyframes cableSlide {{
-    from {{ right: -250px; opacity: 0; }}
-    to {{ right: -140px; opacity: 1; }}
-}}
-
-/* Pulse dots */
-.pulse {{
-    width: 14px;
-    height: 14px;
+.ev-dot {
+    width: 10px;
+    height: 10px;
     background: #ff3640;
     border-radius: 50%;
     position: absolute;
-    box-shadow: 0 0 16px rgba(255,40,40,0.95);
-    opacity: 0;
-    animation: pulsing 1.6s infinite linear;
-    animation-delay: 3.5s;
-}}
+    animation: cablePulse 1.8s infinite linear;
+    box-shadow: 0 0 12px rgba(255,40,40,0.9);
+}
 
-@keyframes pulsing {{
-    0% {{ left: 0px; opacity: 1; }}
-    100% {{ left: {min(200, int(POWER_KW * 12))}px; opacity: 0; }}
-}}
-
-/* Charger */
-.charger {{
-    width: 120px;
-    height: 230px;
-    background: linear-gradient(180deg,#36363a,#17171a);
-    border-radius: 22px;
+.ev-charger {
+    width: 90px;
+    height: 155px;
+    background: linear-gradient(180deg, #2e3036, #1a1a1c 85%);
+    border-radius: 16px;
     position: absolute;
-    right: -340px;
-    top: -30px;
-    border: 1px solid rgba(255,255,255,0.25);
-    box-shadow: 0 0 40px rgba(255,255,255,0.08);
-}}
+    right: -250px;
+    top: -12px;
+    border: 1px solid rgba(255,255,255,0.15);
+}
 
-.screen {{
-    width: 75px;
-    height: 40px;
+.ev-charger-screen {
+    width: 50px;
+    height: 28px;
     background: #E2000F;
-    border-radius: 8px;
-    margin: 25px auto;
-    opacity: 0;
-    animation: screenFade 0.8s ease-in 3.3s forwards, glow 2s infinite 4s;
-}}
+    border-radius: 6px;
+    margin: 18px auto;
+}
 
-@keyframes screenFade {{
-    from {{ opacity: 0; }}
-    to {{ opacity: 1; }}
-}}
-
-@keyframes glow {{
-    0%,100% {{ background:#E2000F; opacity:0.66; }}
-    50% {{ background:#ff5151; opacity:1; }}
-}}
-
-/* Battery */
-.battery {{
-    width: 340px;
-    height: 36px;
-    background: #0b0b0d;
-    border-radius: 12px;
-    border: 2px solid #666;
-    margin: 65px auto 0 auto;
-    position: relative;
-    overflow: hidden;
-}}
-
-.fill {{
-    height: 100%;
-    width: {BATTERY_PERCENT}%;
-    background: linear-gradient(90deg,#E2000F,#ff4a4a);
-    animation: fillSmooth 2.2s ease-out 3.3s forwards;
-    box-shadow: 0 0 22px rgba(226,0,15,0.75);
-}}
-
-@keyframes fillSmooth {{
-    from {{ width: 0%; }}
-    to {{ width: {BATTERY_PERCENT}%; }}
-}}
+@keyframes cablePulse {
+    0% { left: 0px; opacity: 1; }
+    100% { left: 130px; opacity: 0; }
+}
 
 </style>
 
+<div class="ev-wrapper">
+    <div class="ev-card">
+        <div style="position: relative; height: 180px;">
 
-<div class="cinema-wrapper">
-  <div class="cinema-card">
+            <div class="ev-car">
+                <div class="ev-wheel left"></div>
+                <div class="ev-wheel right"></div>
+                <div class="ev-port"></div>
+                <div class="ev-cable"></div>
 
-      <div class="light-pillar light-left"></div>
-      <div class="light-pillar light-right"></div>
+                <div class="ev-dot" style="animation-delay: 0s;"></div>
+                <div class="ev-dot" style="animation-delay: 0.35s;"></div>
+                <div class="ev-dot" style="animation-delay: 0.7s;"></div>
 
-      <div class="tesla-container">
+                <div class="ev-charger">
+                    <div class="ev-charger-screen"></div>
+                </div>
+            </div>
 
-          <div class="tesla-body"></div>
-
-          <div class="tesla-reflection"></div>
-
-          <div class="wheel left-wheel"></div>
-          <div class="wheel right-wheel"></div>
-
-          <div class="headlight left-light"></div>
-          <div class="headlight right-light"></div>
-
-          <div class="underglow"></div>
-
-          <div class="port"></div>
-          <div class="cable"></div>
-
-          <div class="pulse" style="animation-delay:0.0s;"></div>
-          <div class="pulse" style="animation-delay:0.4s;"></div>
-          <div class="pulse" style="animation-delay:0.8s;"></div>
-
-          <div class="charger">
-              <div class="screen"></div>
-          </div>
-
-      </div>
-
-      <div class="battery">
-          <div class="fill"></div>
-      </div>
-
-      <h3 style='text-align:center;margin-top:40px;color:white;font-weight:300;'>
-          Smart Charging – Premium E.ON Cinematic Experience
-      </h3>
-
-  </div>
+        </div>
+        <h3 style='text-align:center;margin-top:22px;color:white;font-weight:300;'>
+            Smart Charging… Optimising Your Energy Costs
+        </h3>
+    </div>
 </div>
-""", height=700)
+""", height=350)
+
 
 
 
