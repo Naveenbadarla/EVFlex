@@ -220,9 +220,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 # =============================================================================
-# EV CHARGING ANIMATION – PREMIUM E.ON STYLE
+# EV CHARGING ANIMATION – PREMIUM E.ON STYLE (SAFE VERSION)
 # =============================================================================
-st.markdown("""
+html_animation = """
 <style>
 
 .ev-wrapper {
@@ -318,7 +318,8 @@ st.markdown("""
     animation: screenGlow 2s infinite ease-in-out;
 }
 
-/* Animations */
+/* Keyframes */
+
 @keyframes wheelGlow {
     0%,100% { box-shadow: 0 0 4px rgba(226,0,15,0.5); }
     50% { box-shadow: 0 0 12px rgba(226,0,15,0.8); }
@@ -366,7 +367,10 @@ st.markdown("""
         </h3>
     </div>
 </div>
-""", unsafe_allow_html=True)
+"""
+
+st.markdown(html_animation, unsafe_allow_html=True)
+
 
 
 # =============================================================================
