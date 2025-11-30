@@ -223,320 +223,358 @@ st.markdown(
 
 from streamlit.components.v1 import html
 
-html("""
+# Plug in actual model results here:
+BATTERY_PERCENT = 72          # <- replace with your computed % 
+POWER_KW = power              # <- from your sidebar
+
+html(f"""
 <style>
 
-/* Wrapper */
-.drive-wrapper {
+body {{
+    overflow-x: hidden;
+}}
+
+.cinema-wrapper {{
     width: 100%;
     display: flex;
     justify-content: center;
-    margin-top: 40px;
-    margin-bottom: 40px;
-}
+    margin-top: 45px;
+    margin-bottom: 45px;
+}}
 
-/* Glass card */
-.drive-card {
-    width: 92%;
-    max-width: 900px;
-    padding: 45px 35px;
-    background: rgba(20,20,25,0.72);
-    border-radius: 25px;
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 25px 65px rgba(0,0,0,0.55);
+/* Ambient futuristic E.ON garage background */
+.cinema-card {{
+    width: 94%;
+    max-width: 1000px;
+    padding: 60px 45px;
+    background: radial-gradient(circle at 50% 120%, #0c0c11 0%, #050507 70%);
+    border-radius: 28px;
+    backdrop-filter: blur(30px);
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 0 80px rgba(0,0,0,0.7);
     position: relative;
     overflow: hidden;
-}
+}}
 
-/* -------------------- TESLA CAR DRIVE-IN -------------------- */
-.drive-car {
+/* Ambient red E.ON glowing pillars */
+.light-pillar {{
+    position: absolute;
+    width: 140px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(226,0,15,0.5), transparent 70%);
+    filter: blur(35px);
+    opacity: 0.25;
+}}
+
+.light-left {{ left: -60px; top: -80px; }}
+.light-right {{ right: -60px; top: -80px; }}
+
+/* Floor reflection surface */
+.floor-reflection {{
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 55%;
+    background: linear-gradient(rgba(255,255,255,0.03), transparent);
+    backdrop-filter: blur(12px);
+    z-index: 1;
+}}
+
+/* Car container with cinematic motion blur */
+.tesla-container {{
     position: relative;
-    width: 460px;
-    height: 130px;
+    width: 500px;
     margin: 0 auto;
-    animation: driveIn 2.6s ease-out forwards;
-}
+    filter: blur(0px);
+    animation: driveIn 2.8s ease-out forwards;
+}}
 
-/* Car body */
-.drive-body {
-    width: 460px;
-    height: 130px;
-    background: linear-gradient(180deg,#4a4d53,#2a2c30);
-    border-radius: 140px 140px 60px 60px;
+@keyframes driveIn {{
+    0% {{
+        transform: translateX(-750px);
+        filter: blur(8px);
+    }}
+    70% {{
+        transform: translateX(20px);
+        filter: blur(2px);
+    }}
+    100% {{
+        transform: translateX(0);
+        filter: blur(0);
+    }}
+}}
+
+/* Tesla body */
+.tesla-body {{
+    width: 500px;
+    height: 140px;
+    background: linear-gradient(180deg,#4e5056,#2d2f33);
+    border-radius: 160px 160px 70px 70px;
+    box-shadow: 0 0 55px rgba(226,0,15,0.3);
     position: relative;
-    box-shadow: 0 0 40px rgba(226,0,15,0.28);
-    animation: settleBounce 0.6s ease-out 2.6s forwards;
-}
+    animation: settleBounce 0.7s ease-out 2.8s forwards;
+}}
+
+@keyframes settleBounce {{
+    0% {{ transform: translateY(-10px); }}
+    50% {{ transform: translateY(6px); }}
+    100% {{ transform: translateY(0px); }}
+}}
+
+/* Reflection of the car */
+.tesla-reflection {{
+    width: 500px;
+    height: 140px;
+    border-radius: 160px 160px 70px 70px;
+    background: linear-gradient(180deg,#2d2f33 0%, transparent 70%);
+    opacity: 0.25;
+    position: absolute;
+    top: 150px;
+    transform: scaleY(-1);
+    filter: blur(6px);
+}}
 
 /* Wheels */
-.drive-wheel {
-    width: 70px;
-    height: 70px;
+.wheel {{
+    width: 78px;
+    height: 78px;
     background: #000;
     border-radius: 50%;
-    border: 6px solid #777;
+    border: 7px solid #888;
     position: absolute;
-    bottom: -26px;
-    animation: wheelRoll 2.2s linear forwards;
-}
-.drive-wheel.left { left: 75px; }
-.drive-wheel.right { right: 75px; }
+    bottom: -30px;
+    animation: roll 2.2s linear forwards;
+}}
 
-/* -------------------- HEADLIGHTS -------------------- */
-.drive-headlight {
-    width: 38px;
-    height: 14px;
+.left-wheel {{ left: 75px; }}
+.right-wheel {{ right: 75px; }}
+
+@keyframes roll {{
+    0% {{ transform: rotate(0deg); }}
+    100% {{ transform: rotate(520deg); }}
+}}
+
+/* Headlights */
+.headlight {{
+    width: 48px;
+    height: 16px;
     background: rgba(255,255,255,0.05);
-    border-radius: 4px;
+    border-radius: 5px;
     position: absolute;
-    top: 42%;
+    top: 43%;
     transform: translateY(-50%);
-    box-shadow: 0 0 4px rgba(255,255,255,0.1);
     opacity: 0;
-    animation: headlightsOn 1.4s ease-out 2.7s forwards;
-}
-.drive-headlight.left { left: 25px; }
-.drive-headlight.right { right: 25px; }
+    animation: lightsOn 1.4s ease-out 2.8s forwards;
+}}
 
-/* Headlight glow beams */
-.drive-headlight::after {
+.left-light {{ left: 20px; }}
+.right-light {{ right: 20px; }}
+
+.headlight::after {{
     content: "";
     position: absolute;
-    left: 0;
-    top: 0;
-    width: 120px;
-    height: 14px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.65), transparent);
+    width: 140px;
+    height: 16px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.7), transparent);
+    filter: blur(5px);
     opacity: 0;
-    filter: blur(4px);
-    border-radius: 6px;
-    animation: headlightBeam 1.4s ease-out 2.7s forwards;
-}
-.drive-headlight.right::after {
-    transform: rotateY(180deg);
-}
+    animation: beamsOn 1.4s ease-out 2.8s forwards;
+}}
 
-/* -------------------- NEON UNDERGLOW -------------------- */
-.drive-underglow {
+.right-light::after {{
+    transform: rotateY(180deg);
+}}
+
+@keyframes lightsOn {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
+
+@keyframes beamsOn {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
+
+/* Underglow */
+.underglow {{
     position: absolute;
-    bottom: -18px;
+    bottom: -20px;
     left: 20%;
     width: 60%;
-    height: 18px;
-    background: radial-gradient(ellipse at center, rgba(226,0,15,0.9), transparent 70%);
-    filter: blur(14px);
+    height: 20px;
+    background: radial-gradient(circle, rgba(226,0,15,0.9), transparent 70%);
+    filter: blur(18px);
     opacity: 0;
-    animation: underglowOn 1.6s ease-in-out 2.6s forwards;
-}
+    animation: underglow 1.3s ease-in-out 2.8s forwards;
+}}
 
-/* -------------------- Charging port -------------------- */
-.drive-port {
-    width: 18px;
-    height: 18px;
+@keyframes underglow {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
+
+/* Charging port */
+.port {{
+    width: 20px;
+    height: 20px;
     background: #E2000F;
     border-radius: 50%;
     position: absolute;
     right: -14px;
-    top: 48%;
+    top: 50%;
     transform: translateY(-50%);
-    box-shadow: 0 0 18px rgba(226,0,15,1);
+    box-shadow: 0 0 22px rgba(226,0,15,1);
     opacity: 0;
-    animation: fadePort 0.8s ease-in 2.8s forwards;
-}
+    animation: portOn 0.8s ease-in 3.1s forwards;
+}}
+
+@keyframes portOn {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
 
 /* Cable */
-.drive-cable {
-    width: 210px;
+.cable {{
+    width: {min(240, int(POWER_KW * 14))}px;
     height: 4px;
     background: rgba(255,255,255,0.3);
     position: absolute;
-    right: -210px;
+    right: -250px;
     top: 50%;
     border-radius: 3px;
     opacity: 0;
-    animation: cableSlide 1s ease-out 3s forwards;
-}
+    animation: cableSlide 1s ease-out 3.2s forwards;
+}}
+
+@keyframes cableSlide {{
+    from {{ right: -250px; opacity: 0; }}
+    to {{ right: -140px; opacity: 1; }}
+}}
 
 /* Pulse dots */
-.drive-dot {
-    width: 12px;
-    height: 12px;
+.pulse {{
+    width: 14px;
+    height: 14px;
     background: #ff3640;
     border-radius: 50%;
     position: absolute;
-    opacity: 0;
     box-shadow: 0 0 16px rgba(255,40,40,0.95);
-    animation: pulseCable 1.6s infinite linear;
-    animation-delay: 3.4s;
-}
+    opacity: 0;
+    animation: pulsing 1.6s infinite linear;
+    animation-delay: 3.5s;
+}}
+
+@keyframes pulsing {{
+    0% {{ left: 0px; opacity: 1; }}
+    100% {{ left: {min(200, int(POWER_KW * 12))}px; opacity: 0; }}
+}}
 
 /* Charger */
-.drive-charger {
-    width: 110px;
-    height: 210px;
-    background: linear-gradient(180deg,#35353a,#17171a);
-    border-radius: 20px;
+.charger {{
+    width: 120px;
+    height: 230px;
+    background: linear-gradient(180deg,#36363a,#17171a);
+    border-radius: 22px;
     position: absolute;
-    right: -330px;
-    top: -20px;
-    border: 1px solid rgba(255,255,255,0.18);
-    box-shadow: 0 0 35px rgba(255,255,255,0.07);
-}
+    right: -340px;
+    top: -30px;
+    border: 1px solid rgba(255,255,255,0.25);
+    box-shadow: 0 0 40px rgba(255,255,255,0.08);
+}}
 
-/* Charger screen */
-.drive-charger-screen {
-    width: 65px;
-    height: 34px;
+.screen {{
+    width: 75px;
+    height: 40px;
     background: #E2000F;
-    border-radius: 6px;
-    margin: 22px auto;
+    border-radius: 8px;
+    margin: 25px auto;
     opacity: 0;
-    animation: fadeInScreen 0.8s ease-in 3s forwards, screenGlow 2s infinite 3.8s;
-}
+    animation: screenFade 0.8s ease-in 3.3s forwards, glow 2s infinite 4s;
+}}
 
-/* Battery container */
-.drive-battery {
-    width: 320px;
-    height: 34px;
-    border-radius: 10px;
+@keyframes screenFade {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
+
+@keyframes glow {{
+    0%,100% {{ background:#E2000F; opacity:0.66; }}
+    50% {{ background:#ff5151; opacity:1; }}
+}}
+
+/* Battery */
+.battery {{
+    width: 340px;
+    height: 36px;
     background: #0b0b0d;
-    margin: 60px auto 0 auto;
+    border-radius: 12px;
     border: 2px solid #666;
+    margin: 65px auto 0 auto;
     position: relative;
     overflow: hidden;
-}
+}}
 
-/* Battery fill */
-.drive-battery-fill {
+.fill {{
     height: 100%;
-    width: 0%;
+    width: {BATTERY_PERCENT}%;
     background: linear-gradient(90deg,#E2000F,#ff4a4a);
-    animation: batteryFill 8s infinite 3.4s;
+    animation: fillSmooth 2.2s ease-out 3.3s forwards;
     box-shadow: 0 0 22px rgba(226,0,15,0.75);
-}
+}}
 
-/* -------------------- KEYFRAMES -------------------- */
-
-/* Car moves in */
-@keyframes driveIn {
-    0% { transform: translateX(-650px); }
-    70% { transform: translateX(10px); }
-    100% { transform: translateX(0px); }
-}
-
-/* Car suspension bounce */
-@keyframes settleBounce {
-    0% { transform: translateY(-8px); }
-    60% { transform: translateY(5px); }
-    90% { transform: translateY(-2px); }
-    100% { transform: translateY(0px); }
-}
-
-/* Wheels rotate */
-@keyframes wheelRoll {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(500deg); }
-}
-
-/* Headlights turning on */
-@keyframes headlightsOn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Headlight beams */
-@keyframes headlightBeam {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Neon underglow on */
-@keyframes underglowOn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Port fade in */
-@keyframes fadePort {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Cable slides to port */
-@keyframes cableSlide {
-    from { right: -220px; opacity: 0; }
-    to { right: -130px; opacity: 1; }
-}
-
-/* Pulses along cable */
-@keyframes pulseCable {
-    0% { left: 0px; opacity: 1; }
-    100% { left: 190px; opacity: 0; }
-}
-
-/* Charger screen glow */
-@keyframes screenGlow {
-    0%,100% { background:#E2000F; opacity:0.65; }
-    50% { background:#ff5151; opacity:1; }
-}
-
-/* Screen fade */
-@keyframes fadeInScreen {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Battery fill */
-@keyframes batteryFill {
-    0% { width: 0%; }
-    25% { width: 45%; }
-    50% { width: 70%; }
-    75% { width: 95%; }
-    100% { width: 0%; }
-}
+@keyframes fillSmooth {{
+    from {{ width: 0%; }}
+    to {{ width: {BATTERY_PERCENT}%; }}
+}}
 
 </style>
 
 
-<div class="drive-wrapper">
-  <div class="drive-card">
+<div class="cinema-wrapper">
+  <div class="cinema-card">
 
-      <div class="drive-car">
+      <div class="light-pillar light-left"></div>
+      <div class="light-pillar light-right"></div>
 
-          <div class="drive-body"></div>
+      <div class="tesla-container">
 
-          <div class="drive-wheel left"></div>
-          <div class="drive-wheel right"></div>
+          <div class="tesla-body"></div>
 
-          <div class="drive-headlight left"></div>
-          <div class="drive-headlight right"></div>
+          <div class="tesla-reflection"></div>
 
-          <div class="drive-underglow"></div>
+          <div class="wheel left-wheel"></div>
+          <div class="wheel right-wheel"></div>
 
-          <div class="drive-port"></div>
-          <div class="drive-cable"></div>
+          <div class="headlight left-light"></div>
+          <div class="headlight right-light"></div>
 
-          <div class="drive-dot" style="animation-delay:0s;"></div>
-          <div class="drive-dot" style="animation-delay:0.4s;"></div>
-          <div class="drive-dot" style="animation-delay:0.8s;"></div>
+          <div class="underglow"></div>
 
-          <div class="drive-charger">
-              <div class="drive-charger-screen"></div>
+          <div class="port"></div>
+          <div class="cable"></div>
+
+          <div class="pulse" style="animation-delay:0.0s;"></div>
+          <div class="pulse" style="animation-delay:0.4s;"></div>
+          <div class="pulse" style="animation-delay:0.8s;"></div>
+
+          <div class="charger">
+              <div class="screen"></div>
           </div>
+
       </div>
 
-      <div class="drive-battery">
-          <div class="drive-battery-fill"></div>
+      <div class="battery">
+          <div class="fill"></div>
       </div>
 
-      <h3 style='text-align:center;margin-top:30px;color:white;font-weight:300;'>
-          Smart Charging – Tesla Arriving…
+      <h3 style='text-align:center;margin-top:40px;color:white;font-weight:300;'>
+          Smart Charging – Premium E.ON Cinematic Experience
       </h3>
 
   </div>
 </div>
-""", height=620)
+""", height=700)
+
 
 
 
