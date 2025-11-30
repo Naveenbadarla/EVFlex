@@ -109,7 +109,7 @@ if price_source == "Built-in historical (data/…csv)":
 if price_source == "Upload DA+ID CSVs":
     if da_file is None or id_file is None:
         st.warning("Please upload both DA & ID files or use another source.")
-        return synthetic_da_id_profiles_96()
+    return synthetic_da_id_profiles_96()
 
     da_series = load_price_15min(da_file)
     id_series = load_price_15min(id_file)
