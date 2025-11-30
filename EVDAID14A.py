@@ -3,6 +3,117 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import datetime
+import base64
+
+def load_logo(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+logo_base64 = load_logo("eon_logo.png")
+
+# ---------------- ADVANCED E.ON BRANDED HEADER ----------------
+st.markdown("""
+    <style>
+        /* Full-width header container */
+        .eon-header {
+            width: 100%;
+            background: linear-gradient(90deg, #E2000F 0%, #FF4B4B 40%, #FF7A7A 100%);
+            padding: 25px 40px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Logo styling */
+        .eon-header-logo {
+            width: 95px;
+            height: auto;
+            margin-right: 25px;
+            filter: drop-shadow(0 0 6px rgba(0,0,0,0.25));
+        }
+
+        /* Text section */
+        .eon-header-text h1 {
+            color: white;
+            margin: 0;
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .eon-header-text h3 {
+            color: rgba(255,255,255,0.9);
+            margin-top: 5px;
+            font-size: 20px;
+            font-weight: 300;
+        }
+
+        /* Navigation bar (optional) */
+        .eon-nav {
+            margin-top: 15px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .eon-nav a {
+            color: white;
+            font-size: 16px;
+            text-decoration: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            transition: 0.2s;
+            font-weight: 400;
+        }
+
+        .eon-nav a:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Sticky mode (optional) */
+        .sticky {
+            position: sticky;
+            top: 0;
+            z-index: 999;
+        }
+
+        /* Responsive scaling */
+        @media (max-width: 768px) {
+            .eon-header {
+                flex-direction: column;
+                text-align: center;
+                padding: 20px 20px;
+            }
+            .eon-header-logo {
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+
+st.markdown(
+    f"""
+    <div class="eon-header sticky">
+        <img src="data:image/png;base64,{logo_base64}" class="eon-header-logo">
+        <div class="eon-header-text">
+            <h1>EV Charging Optimisation Dashboard</h1>
+            <h3>Full-Year Day-Ahead & Intraday Market Integration</h3>
+
+            <!-- Optional Navigation -->
+            <div class="eon-nav">
+                <a href="#overview">Overview</a>
+                <a href="#prices">Market Prices</a>
+                <a href="#results">Results</a>
+                <a href="#details">Details</a>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ==========================================================================
