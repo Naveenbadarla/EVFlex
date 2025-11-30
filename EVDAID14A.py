@@ -3,11 +3,11 @@ import pandas as pd
 import streamlit as st
 
 
-# ---------- Synthetic price model (DA hourly + ID 15-min) ----------
+# ---------- Synthetic daily price model (DA hourly + ID 15-min) ----------
 
-def get_synthetic_price_profiles():
+def get_synthetic_daily_price_profiles():
     """
-    Returns:
+    Returns synthetic daily profiles:
         da_hourly_eur_mwh: np.array shape (24,)
         id_quarter_eur_mwh: np.array shape (96,)
     DA is hourly, ID is 15-minute.
@@ -29,32 +29,68 @@ def get_synthetic_price_profiles():
     return da_hourly, id_quarter
 
 
-# ---------- Charging frequency system ----------
+# ---------- Charging frequency system (returns explicit day indices) ----------
 
-def compute_days_per_year_from_pattern(frequency_mode, custom_weekdays=None, sessions_per_week=None):
+DAY_NAME_TO_IDX = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
+
+
+def compute_charging_days(pattern, num_days, custom_weekdays=None, sessions_per_week=None):
     """
-    Convert user selection to the effective number of charging days per year.
-    Assumes 365 days/year.
+    Return a list of day indices [0 .. num_days-1] on which charging occurs.
+    Assume day 0 is a Monday (for weekday/weekend logic).
     """
-    if frequency_mode == "Every day":
-        return 365
+    if custom_weekdays is None:
+        custom_weekdays = []
 
-    if frequency_mode == "Every other day":
-        return 365 // 2
+    if pattern == "Every day":
+        return list(range(num_days))
 
-    if frequency_mode == "Weekdays only (Mon–Fri)":
-        return 5 * 52  # approx 260
+    if pattern == "Every other day":
+        return list(range(0, num_days, 2))
 
-    if frequency_mode == "Weekends only (Sat–Sun)":
-        return 2 * 52  # approx 104
+    if pattern == "Weekdays only (Mon–Fri)":
+        days = []
+        for d in range(num_days):
+            dow = d % 7
+            if dow in {0, 1, 2, 3, 4}:
+                days.append(d)
+        return days
 
-    if frequency_mode == "Custom weekdays":
-        return len(custom_weekdays) * 52
+    if pattern == "Weekends only (Sat–Sun)":
+        days = []
+        for d in range(num_days):
+            dow = d % 7
+            if dow in {5, 6}:
+                days.append(d)
+        return days
 
-    if frequency_mode == "Custom: X sessions per week":
-        return int(sessions_per_week * 52)
+    if pattern == "Custom weekdays":
+        include_dows = {DAY_NAME_TO_IDX[name] for name in custom_weekdays}
+        days = []
+        for d in range(num_days):
+            dow = d % 7
+            if dow in include_dows:
+                days.append(d)
+        return days
 
-    return 365
+    if pattern == "Custom: X sessions per week":
+        if sessions_per_week is None or sessions_per_week <= 0:
+            return []
+        sessions_per_week = int(sessions_per_week)
+        days = []
+        num_weeks = num_days // 7
+        for w in range(num_weeks):
+            # Spread sessions evenly over the 7 days of each week
+            for s in range(sessions_per_week):
+                day_in_week = int(np.floor(s * 7 / sessions_per_week))
+                d = w * 7 + day_in_week
+                if d < num_days:
+                    days.append(d)
+        # If num_days is not multiple of 7, ignore remainder for simplicity
+        return days
+
+    # Fallback: every day
+    return list(range(num_days))
 
 
 # ---------- Time window helpers (15-min granularity) ----------
@@ -62,7 +98,7 @@ def compute_days_per_year_from_pattern(frequency_mode, custom_weekdays=None, ses
 def build_available_quarters(arrival_time_h, departure_time_h):
     """
     Convert arrival & departure times (in hours, 0–24) into a list of
-    15-minute slot indices in [0, 95].
+    15-minute slot indices in [0, 95] for a single day.
 
     Supports cross-midnight:
         e.g. arrival=18, departure=6 -> evening + night window.
@@ -97,17 +133,17 @@ def compute_da_indexed_baseline_daily(
     energy_kwh,
     max_power_kw,
     available_quarters,
-    da_hourly_eur_mwh,
+    da_hourly_day_eur_mwh,
     grid_charges,
     taxes_levies,
     vat_percent,
 ):
     """
     Scenario 2: DA-indexed customer, no optimisation.
-    Baseline sequential charging from arrival, with DA prices + tariffs.
+    Baseline sequential charging from arrival, with DA prices + tariffs for ONE day.
     """
-    da_hourly_kwh = da_hourly_eur_mwh / 1000.0  # €/kWh
-    da_quarter_kwh = np.repeat(da_hourly_kwh, 4)
+    da_hourly_kwh = da_hourly_day_eur_mwh / 1000.0  # €/kWh
+    da_quarter_kwh = np.repeat(da_hourly_kwh, 4)    # 96 values
 
     energy_remaining = energy_kwh
     total_cost = 0.0
@@ -132,16 +168,16 @@ def compute_optimised_daily_cost(
     energy_kwh,
     max_power_kw,
     available_quarters,
-    price_quarter_eur_mwh,
+    price_quarter_day_eur_mwh,
     grid_charges,
     taxes_levies,
     vat_percent,
 ):
     """
-    For DA-optimised and DA+ID-optimised.
+    For DA-optimised and DA+ID-optimised for ONE day.
     Optimises within the available quarters using the given price_quarter (€/MWh).
     """
-    price_kwh = price_quarter_eur_mwh / 1000.0
+    price_kwh = price_quarter_day_eur_mwh / 1000.0
     max_energy_per_q = max_power_kw * 0.25
 
     max_deliverable = len(available_quarters) * max_energy_per_q
@@ -168,21 +204,54 @@ def compute_optimised_daily_cost(
     return total_cost
 
 
+# ---------- Helpers: loading yearly price series ----------
+
+def load_price_series_from_csv(uploaded_file, expected_multiple, label):
+    """
+    Load a 1D price series from a CSV.
+
+    - Tries 'price' column first, otherwise first numeric column.
+    - Ensures length is a multiple of expected_multiple (24 for DA, 96 for ID).
+    Returns:
+        series (np.array), num_days
+    """
+    df = pd.read_csv(uploaded_file)
+
+    if "price" in df.columns:
+        series = df["price"].values
+    else:
+        num_cols = df.select_dtypes(include="number")
+        if num_cols.shape[1] == 0:
+            st.error(f"{label}: No numeric columns found in uploaded file.")
+            return None, 0
+        series = num_cols.iloc[:, 0].values
+
+    if len(series) % expected_multiple != 0:
+        st.error(
+            f"{label}: Length of series ({len(series)}) is not a multiple of {expected_multiple}. "
+            f"Expected full-year data, e.g. 8760 for DA (24*365) or 35040 for ID (96*365)."
+        )
+        return None, 0
+
+    num_days = len(series) // expected_multiple
+    return series.astype(float), num_days
+
+
 # ---------- Streamlit UI ----------
 
 def main():
-    st.title("EV Charging: Flat Retail vs DA vs DA-Optimised vs DA+ID-Optimised")
+    st.title("EV Charging: Flat vs DA vs DA-Optimised vs DA+ID-Optimised (Full-Year DA+ID)")
 
     st.write(
         """
-        This app compares **4 customer archetypes** for EV charging:
+        This app compares **4 customer types** over a full year of prices:
 
-        1. **Flat retail price** (one fixed €/kWh, no market exposure)  
-        2. **DA-indexed** (dynamic hourly price, no optimisation)  
-        3. **DA-optimised smart charging** (cheapest 15-min slots using DA only)  
-        4. **DA+ID-optimised smart charging** (cheapest 15-min slots using min(DA, ID))  
+        1. **Flat retail price** (fixed €/kWh, no market exposure)  
+        2. **DA-indexed** (hourly dynamic price, no optimisation)  
+        3. **DA-optimised** (smart charging using DA only)  
+        4. **DA+ID-optimised** (smart charging using min(DA, ID))  
 
-        All with the **same EV**, **same driving/charging pattern**, and **same tariffs**.
+        You can upload **full-year DA & ID price series** or use **synthetic data**.
         """
     )
 
@@ -259,11 +328,6 @@ def main():
             step=1,
         )
 
-    days_per_year = compute_days_per_year_from_pattern(
-        frequency_mode, custom_weekdays, sessions_per_week
-    )
-    st.sidebar.info(f"Estimated charging days per year: **{days_per_year}**")
-
     # ---------- Sidebar: Tariffs ----------
     st.sidebar.header("Tariffs")
 
@@ -278,15 +342,15 @@ def main():
         help="Final €/kWh paid by flat-price customer (energy + grid + taxes + VAT).",
     )
 
-    st.sidebar.subheader("2) Dynamic DA / DA+ID Tariff Components (Scenarios 2–4)")
+    st.sidebar.subheader("2) Dynamic Tariff Components (Scenarios 2–4)")
 
     grid_charges = st.sidebar.number_input(
         "Grid network charges (€/kWh)",
         min_value=0.0,
         max_value=1.0,
-        value=0.10,
+        value=0.11,
         step=0.01,
-        help="DSO + TSO variable network fees",
+        help="DSO + TSO variable network fees (Germany example ≈ 0.09–0.13 €/kWh).",
     )
 
     taxes_levies = st.sidebar.number_input(
@@ -295,89 +359,167 @@ def main():
         max_value=1.0,
         value=0.05,
         step=0.01,
-        help="Energy duty, renewable surcharges, etc.",
+        help="Electricity tax + other surcharges (Germany example ≈ 0.04–0.06 €/kWh).",
     )
 
     vat_percent = st.sidebar.number_input(
         "VAT (%)",
         min_value=0.0,
         max_value=30.0,
-        value=20.0,
+        value=19.0,
         step=1.0,
-        help="Applied on top of energy + grid + taxes for dynamic tariffs.",
+        help="Standard VAT (Germany: 19%).",
     )
 
-    # ---------- Price profiles ----------
-    da_hourly, id_quarter = get_synthetic_price_profiles()
-    da_quarter = np.repeat(da_hourly, 4)              # 96 values
-    effective_price = np.minimum(da_quarter, id_quarter)
+    # ---------- Sidebar: Upload market data ----------
+    st.sidebar.header("Upload Market Data (Optional)")
 
-    with st.expander("Show synthetic DA & ID price profiles"):
+    da_file = st.sidebar.file_uploader(
+        "Upload DA prices (hourly, CSV, full year: 24 * days rows)",
+        type=["csv"],
+        key="da_file",
+    )
+
+    id_file = st.sidebar.file_uploader(
+        "Upload ID prices (15-min, CSV, full year: 96 * days rows)",
+        type=["csv"],
+        key="id_file",
+    )
+
+    # ---------- Build yearly DA & ID arrays ----------
+    # Step 1: synthetic daily patterns
+    da_daily_syn, id_daily_syn = get_synthetic_daily_price_profiles()
+
+    # Step 2: if upload is present, load; otherwise use synthetic repeated over 365 days
+    da_hourly_year = None
+    id_quarter_year = None
+    num_days_da = 365
+    num_days_id = 365
+
+    if da_file is not None:
+        da_series, num_days_da = load_price_series_from_csv(da_file, 24, "DA prices")
+        if da_series is not None:
+            da_hourly_year = da_series
+    else:
+        da_hourly_year = np.tile(da_daily_syn, 365)
+        num_days_da = 365
+
+    if id_file is not None:
+        id_series, num_days_id = load_price_series_from_csv(id_file, 96, "ID prices")
+        if id_series is not None:
+            id_quarter_year = id_series
+    else:
+        id_quarter_year = np.tile(id_daily_syn, 365)
+        num_days_id = 365
+
+    # Determine how many full days we have consistently
+    num_days_year = min(num_days_da, num_days_id)
+    if num_days_year == 0:
+        st.error("No valid price data loaded. Check DA/ID uploads.")
+        return
+
+    st.sidebar.info(f"Using **{num_days_year} days** of market data.")
+
+    # Truncate to common number of days
+    da_hourly_year = da_hourly_year[: num_days_year * 24]
+    id_quarter_year = id_quarter_year[: num_days_year * 96]
+
+    # ---------- Charging days over the year ----------
+    charging_days = compute_charging_days(
+        frequency_mode,
+        num_days_year,
+        custom_weekdays=custom_weekdays,
+        sessions_per_week=sessions_per_week,
+    )
+    days_per_year = len(charging_days)
+    st.sidebar.info(f"Charging occurs on **{days_per_year}** days (pattern + data length).")
+
+    # ---------- Inspect price profiles for the first day ----------
+    with st.expander("Show DA & ID price profiles for Day 1 (index 0)"):
+        da_day0 = da_hourly_year[0:24]
+        id_day0 = id_quarter_year[0:96]
+        da_quarter0 = np.repeat(da_day0, 4)
+        effective0 = np.minimum(da_quarter0, id_day0)
+
         times_str = [f"{int(i//4):02d}:{int((i%4)*15):02d}" for i in range(96)]
-        df_prices = pd.DataFrame(
+        df_prices0 = pd.DataFrame(
             {
-                "DA (€/MWh)": da_quarter,
-                "ID (€/MWh)": id_quarter,
-                "Effective min(DA, ID) (€/MWh)": effective_price,
+                "DA (€/MWh)": da_quarter0,
+                "ID (€/MWh)": id_day0,
+                "Effective min(DA, ID) (€/MWh)": effective0,
             },
             index=times_str,
         )
-        df_prices.index.name = "Time"
-        st.dataframe(df_prices.style.format("{:.1f}"))
-        st.line_chart(df_prices)
+        df_prices0.index.name = "Time"
+        st.dataframe(df_prices0.style.format("{:.1f}"))
+        st.line_chart(df_prices0)
 
-    # ---------- Compute costs ----------
+    # ---------- Compute costs over the selected days ----------
     try:
-        # Time window (15-min slots)
+        # Single-day time window (same pattern used for all days)
         available_quarters, arrival_q, departure_q = build_available_quarters(
             arrival_time_h, departure_time_h
         )
 
         if len(available_quarters) == 0:
-            raise ValueError("Selected charging window is empty.")
+            st.error("Selected charging window is empty.")
+            return
 
-        # Scenario 1: Flat retail price customer (no need for time structure)
-        flat_daily = energy_kwh * flat_retail_price
-        flat_annual = flat_daily * days_per_year
+        # Scenario 1: Flat retail price customer (no market exposure)
+        flat_daily_cost = energy_kwh * flat_retail_price
 
-        # Scenario 2: DA-indexed (baseline, no optimisation)
-        da_indexed_daily = compute_da_indexed_baseline_daily(
-            energy_kwh,
-            max_power_kw,
-            available_quarters,
-            da_hourly,
-            grid_charges,
-            taxes_levies,
-            vat_percent,
-        )
-        da_indexed_annual = da_indexed_daily * days_per_year
+        flat_annual = flat_daily_cost * days_per_year
 
-        # Scenario 3: DA-optimised (smart charging, DA only)
-        da_optimised_daily = compute_optimised_daily_cost(
-            energy_kwh,
-            max_power_kw,
-            available_quarters,
-            da_quarter,
-            grid_charges,
-            taxes_levies,
-            vat_percent,
-        )
-        da_optimised_annual = da_optimised_daily * days_per_year
+        # Initialise sums for scenarios 2–4
+        da_indexed_annual = 0.0
+        da_optimised_annual = 0.0
+        da_id_optimised_annual = 0.0
 
-        # Scenario 4: DA+ID-optimised (smart charging, DA+ID)
-        da_id_optimised_daily = compute_optimised_daily_cost(
-            energy_kwh,
-            max_power_kw,
-            available_quarters,
-            effective_price,
-            grid_charges,
-            taxes_levies,
-            vat_percent,
-        )
-        da_id_optimised_annual = da_id_optimised_daily * days_per_year
+        for day in charging_days:
+            # Extract this day's price slices
+            da_day = da_hourly_year[day * 24 : (day + 1) * 24]
+            id_day = id_quarter_year[day * 96 : (day + 1) * 96]
+            da_quarter_day = np.repeat(da_day, 4)
+            effective_day = np.minimum(da_quarter_day, id_day)
+
+            # Scenario 2: DA-indexed baseline (no optimisation)
+            daily_da_indexed = compute_da_indexed_baseline_daily(
+                energy_kwh,
+                max_power_kw,
+                available_quarters,
+                da_day,
+                grid_charges,
+                taxes_levies,
+                vat_percent,
+            )
+            da_indexed_annual += daily_da_indexed
+
+            # Scenario 3: DA-optimised (smart, DA only)
+            daily_da_opt = compute_optimised_daily_cost(
+                energy_kwh,
+                max_power_kw,
+                available_quarters,
+                da_quarter_day,
+                grid_charges,
+                taxes_levies,
+                vat_percent,
+            )
+            da_optimised_annual += daily_da_opt
+
+            # Scenario 4: DA+ID-optimised (smart, DA+ID)
+            daily_da_id_opt = compute_optimised_daily_cost(
+                energy_kwh,
+                max_power_kw,
+                available_quarters,
+                effective_day,
+                grid_charges,
+                taxes_levies,
+                vat_percent,
+            )
+            da_id_optimised_annual += daily_da_id_opt
 
         # ---------- Display results ----------
-        st.subheader("Annual Cost by Customer Type")
+        st.subheader("Annual Cost by Customer Type (using yearly DA & ID)")
 
         col1, col2 = st.columns(2)
         col3, col4 = st.columns(2)
@@ -405,9 +547,9 @@ def main():
         c2.metric("DA-optimised vs flat", f"{s3_abs:,.0f} € / yr", f"{s3_pct:.1f} %")
         c3.metric("DA+ID-optimised vs flat", f"{s4_abs:,.0f} € / yr", f"{s4_pct:.1f} %")
 
-        # ---------- Optional comparison chart ----------
+        # ---------- Bar chart ----------
         st.markdown("---")
-        st.subheader("Cost Comparison (bar chart)")
+        st.subheader("Cost Comparison (Annual)")
 
         df_bar = pd.DataFrame(
             {
@@ -435,13 +577,18 @@ def main():
         st.write(
             f"""
             - Optimisation resolution: **15 minutes (96 slots/day)**  
-            - Synthetic **DA hourly** and **ID 15-min** price profiles  
+            - DA: hourly prices; ID: 15-min prices  
             - DA+ID effective price = **min(DA, ID)** per 15-min slot  
-            - Flat retail customer pays a **fixed all-in €/kWh** (no extra VAT in the model)  
+            - If you upload price files:
+                - DA file must have **24 × N** rows (hourly)  
+                - ID file must have **96 × N** rows (15-min)  
+                - The model uses the first **N = min(N_DA_days, N_ID_days)** days  
+            - If no files are uploaded, synthetic daily profiles are repeated for 365 days.  
+            - Flat retail customer pays: **flat_retail_price (€/kWh)** all-in (no extra VAT applied in the model).  
             - Dynamic customers (2–4) pay:  
               **(wholesale price + grid_charges + taxes_levies) × (1 + VAT)**  
-            - Same EV, energy per session = **{energy_kwh:.1f} kWh**, max power = **{max_power_kw:.1f} kW**  
-            - Charging days per year based on your selection: **{days_per_year}**  
+            - Arrival & departure times are the same every charging day.  
+            - Charging days are selected according to your pattern over the **{num_days_year}** days of price data, resulting in **{days_per_year}** charging sessions per year.  
             """
         )
 
