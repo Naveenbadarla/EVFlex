@@ -226,7 +226,7 @@ from streamlit.components.v1 import html
 html("""
 <style>
 
-/* Overall wrapper */
+/* Wrapper */
 .drive-wrapper {
     width: 100%;
     display: flex;
@@ -235,7 +235,7 @@ html("""
     margin-bottom: 40px;
 }
 
-/* Premium glass card */
+/* Glass card */
 .drive-card {
     width: 92%;
     max-width: 900px;
@@ -249,77 +249,124 @@ html("""
     overflow: hidden;
 }
 
-/* Tesla car container with drive-in motion */
+/* -------------------- TESLA CAR DRIVE-IN -------------------- */
 .drive-car {
     position: relative;
-    width: 420px;
-    height: 120px;
+    width: 460px;
+    height: 130px;
     margin: 0 auto;
     animation: driveIn 2.6s ease-out forwards;
 }
 
-/* Tesla body */
+/* Car body */
 .drive-body {
-    width: 420px;
-    height: 120px;
-    background: linear-gradient(180deg,#3a3d42,#2d2f34);
-    border-radius: 120px 120px 50px 50px;
+    width: 460px;
+    height: 130px;
+    background: linear-gradient(180deg,#4a4d53,#2a2c30);
+    border-radius: 140px 140px 60px 60px;
     position: relative;
-    box-shadow: 0 0 35px rgba(226,0,15,0.28);
+    box-shadow: 0 0 40px rgba(226,0,15,0.28);
     animation: settleBounce 0.6s ease-out 2.6s forwards;
 }
 
 /* Wheels */
 .drive-wheel {
-    width: 64px;
-    height: 64px;
+    width: 70px;
+    height: 70px;
     background: #000;
     border-radius: 50%;
-    border: 6px solid #888;
+    border: 6px solid #777;
     position: absolute;
-    bottom: -24px;
+    bottom: -26px;
     animation: wheelRoll 2.2s linear forwards;
 }
-.drive-wheel.left { left: 58px; }
-.drive-wheel.right { right: 58px; }
+.drive-wheel.left { left: 75px; }
+.drive-wheel.right { right: 75px; }
 
-/* Charging port */
+/* -------------------- HEADLIGHTS -------------------- */
+.drive-headlight {
+    width: 38px;
+    height: 14px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    position: absolute;
+    top: 42%;
+    transform: translateY(-50%);
+    box-shadow: 0 0 4px rgba(255,255,255,0.1);
+    opacity: 0;
+    animation: headlightsOn 1.4s ease-out 2.7s forwards;
+}
+.drive-headlight.left { left: 25px; }
+.drive-headlight.right { right: 25px; }
+
+/* Headlight glow beams */
+.drive-headlight::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 120px;
+    height: 14px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.65), transparent);
+    opacity: 0;
+    filter: blur(4px);
+    border-radius: 6px;
+    animation: headlightBeam 1.4s ease-out 2.7s forwards;
+}
+.drive-headlight.right::after {
+    transform: rotateY(180deg);
+}
+
+/* -------------------- NEON UNDERGLOW -------------------- */
+.drive-underglow {
+    position: absolute;
+    bottom: -18px;
+    left: 20%;
+    width: 60%;
+    height: 18px;
+    background: radial-gradient(ellipse at center, rgba(226,0,15,0.9), transparent 70%);
+    filter: blur(14px);
+    opacity: 0;
+    animation: underglowOn 1.6s ease-in-out 2.6s forwards;
+}
+
+/* -------------------- Charging port -------------------- */
 .drive-port {
     width: 18px;
     height: 18px;
     background: #E2000F;
     border-radius: 50%;
     position: absolute;
-    right: -12px;
-    top: 46%;
+    right: -14px;
+    top: 48%;
     transform: translateY(-50%);
     box-shadow: 0 0 18px rgba(226,0,15,1);
     opacity: 0;
-    animation: fadePort 0.8s ease-in 2.6s forwards;
+    animation: fadePort 0.8s ease-in 2.8s forwards;
 }
 
-/* Cable appears after car stops */
+/* Cable */
 .drive-cable {
-    width: 200px;
+    width: 210px;
     height: 4px;
-    background: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.3);
     position: absolute;
-    right: -200px;
+    right: -210px;
     top: 50%;
     border-radius: 3px;
     opacity: 0;
     animation: cableSlide 1s ease-out 3s forwards;
 }
 
-/* Pulse effect along cable */
+/* Pulse dots */
 .drive-dot {
     width: 12px;
     height: 12px;
     background: #ff3640;
     border-radius: 50%;
     position: absolute;
-    box-shadow: 0 0 16px rgba(255,40,40,0.95);
     opacity: 0;
+    box-shadow: 0 0 16px rgba(255,40,40,0.95);
     animation: pulseCable 1.6s infinite linear;
     animation-delay: 3.4s;
 }
@@ -328,13 +375,13 @@ html("""
 .drive-charger {
     width: 110px;
     height: 210px;
-    background: linear-gradient(180deg,#303035,#17171a);
+    background: linear-gradient(180deg,#35353a,#17171a);
     border-radius: 20px;
     position: absolute;
-    right: -310px;
+    right: -330px;
     top: -20px;
-    border: 1px solid rgba(255,255,255,0.2);
-    box-shadow: 0 0 35px rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: 0 0 35px rgba(255,255,255,0.07);
 }
 
 /* Charger screen */
@@ -350,14 +397,14 @@ html("""
 
 /* Battery container */
 .drive-battery {
-    width: 300px;
+    width: 320px;
     height: 34px;
-    background: #0b0b0d;
-    border: 2px solid #555;
     border-radius: 10px;
+    background: #0b0b0d;
+    margin: 60px auto 0 auto;
+    border: 2px solid #666;
     position: relative;
     overflow: hidden;
-    margin: 50px auto 0 auto;
 }
 
 /* Battery fill */
@@ -366,63 +413,81 @@ html("""
     width: 0%;
     background: linear-gradient(90deg,#E2000F,#ff4a4a);
     animation: batteryFill 8s infinite 3.4s;
-    box-shadow: 0 0 20px rgba(226,0,15,0.75);
+    box-shadow: 0 0 22px rgba(226,0,15,0.75);
 }
 
-/* Keyframes -------------------------------------------- */
+/* -------------------- KEYFRAMES -------------------- */
 
-/* Car movement from left to center */
+/* Car moves in */
 @keyframes driveIn {
     0% { transform: translateX(-650px); }
     70% { transform: translateX(10px); }
     100% { transform: translateX(0px); }
 }
 
-/* Soft suspension bounce when stopping */
+/* Car suspension bounce */
 @keyframes settleBounce {
-    0% { transform: translateY(-6px); }
-    60% { transform: translateY(4px); }
+    0% { transform: translateY(-8px); }
+    60% { transform: translateY(5px); }
     90% { transform: translateY(-2px); }
     100% { transform: translateY(0px); }
 }
 
-/* Wheel rotation */
+/* Wheels rotate */
 @keyframes wheelRoll {
     0% { transform: rotate(0deg); }
-    100% { transform: rotate(450deg); }
+    100% { transform: rotate(500deg); }
 }
 
-/* Port fade-in */
+/* Headlights turning on */
+@keyframes headlightsOn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Headlight beams */
+@keyframes headlightBeam {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Neon underglow on */
+@keyframes underglowOn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Port fade in */
 @keyframes fadePort {
     from { opacity: 0; }
     to { opacity: 1; }
 }
 
-/* Cable slides toward port */
+/* Cable slides to port */
 @keyframes cableSlide {
-    from { right: -200px; opacity: 0; }
-    to { right: -120px; opacity: 1; }
+    from { right: -220px; opacity: 0; }
+    to { right: -130px; opacity: 1; }
 }
 
-/* Pulsing dots along cable */
+/* Pulses along cable */
 @keyframes pulseCable {
     0% { left: 0px; opacity: 1; }
     100% { left: 190px; opacity: 0; }
 }
 
-/* Screen fade-in */
+/* Charger screen glow */
+@keyframes screenGlow {
+    0%,100% { background:#E2000F; opacity:0.65; }
+    50% { background:#ff5151; opacity:1; }
+}
+
+/* Screen fade */
 @keyframes fadeInScreen {
     from { opacity: 0; }
     to { opacity: 1; }
 }
 
-/* Screen glowing */
-@keyframes screenGlow {
-    0%,100% { background:#E2000F; opacity:0.7; }
-    50% { background:#ff5151; opacity:1; }
-}
-
-/* Battery filling animation */
+/* Battery fill */
 @keyframes batteryFill {
     0% { width: 0%; }
     25% { width: 45%; }
@@ -433,14 +498,21 @@ html("""
 
 </style>
 
+
 <div class="drive-wrapper">
   <div class="drive-card">
 
       <div class="drive-car">
+
           <div class="drive-body"></div>
 
           <div class="drive-wheel left"></div>
           <div class="drive-wheel right"></div>
+
+          <div class="drive-headlight left"></div>
+          <div class="drive-headlight right"></div>
+
+          <div class="drive-underglow"></div>
 
           <div class="drive-port"></div>
           <div class="drive-cable"></div>
@@ -464,7 +536,8 @@ html("""
 
   </div>
 </div>
-""", height=550)
+""", height=620)
+
 
 
 
