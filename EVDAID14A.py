@@ -88,7 +88,7 @@ def synthetic_da_id_profiles_96():
 def get_da_id_profiles_96(price_source, year, da_file, id_file):
     """Return (da_96, id_96) based on user selection."""
     if price_source == "Synthetic example":
-        return synthetic_da_id_profiles_96()
+    return synthetic_da_id_profiles_96()
 
 if price_source == "Built-in historical (data/…csv)":
     da_path = DATA_DIR / f"da_{year}.csv"
