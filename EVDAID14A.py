@@ -639,7 +639,7 @@ if mode == "Single Day":
             - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
             """
         )
-        # ============================================================
+    # ============================================================
     # EXPANDER 1 — DA vs ID PRICE CURVES
     # ============================================================
 
