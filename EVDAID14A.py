@@ -644,40 +644,57 @@ with st.expander("📈 Prices: DA vs ID (15-minute resolution)"):
     - Smart DA+ID will shift charging into low-ID dips.
     """)
 
-    # ============================================================
-# EXPANDER 2 — Compare Charging Patterns (DA vs DA+ID)
+# ============================================================
+# EXPANDER 2 — MUCH CLEARER Charging Comparison (DA vs DA+ID)
 # ============================================================
 
-with st.expander("🔌 Charging Comparison: Smart DA vs Smart DA+ID"):
+with st.expander("🔌 Clear Charging Comparison: Smart DA vs Smart DA+ID"):
 
-    compare_df = pd.DataFrame({
-        "Hour": hours_window,
-        "Smart DA (kWh)": [smart_da_hourly[h] for h in hours_window],
-        "Smart DA+ID (kWh)": [smart_full_hourly[h] for h in hours_window],
-    })
+    # Build a cleaned dataframe only with hours where at least one scenario charges
+    comp_rows = []
+    for h in range(96):
+        da_val = float(charge_smart_da_96[h])
+        full_val = float(charge_smart_full_96[h])
+        if da_val > 0 or full_val > 0:
+            comp_rows.append({
+                "Hour": h,
+                "Smart DA (kWh)": da_val,
+                "Smart DA+ID (kWh)": full_val
+            })
 
-    compare_long = compare_df.melt("Hour", var_name="Scenario", value_name="kWh")
+    if len(comp_rows) == 0:
+        st.info("No charging occurs during the selected window.")
+    else:
+        compare_df = pd.DataFrame(comp_rows)
 
-    compare_chart = (
-        alt.Chart(compare_long)
-        .mark_bar()
-        .encode(
-            x="Hour:O",
-            y="kWh:Q",
-            color="Scenario:N",
-            tooltip=["Hour", "Scenario", alt.Tooltip("kWh", format=".3f")]
+        # Convert quarter-hour index to hour of day text
+        compare_df["HourLabel"] = compare_df["Hour"].apply(lambda x: f"{(x//4):02d}:{(x%4)*15:02d}")
+
+        # Melt for grouped bar format
+        compare_long = compare_df.melt("HourLabel", var_name="Scenario", value_name="kWh")
+
+        clear_chart = (
+            alt.Chart(compare_long)
+            .mark_bar()
+            .encode(
+                x=alt.X("HourLabel:O", title="Time of Day"),
+                y=alt.Y("kWh:Q", title="Charging (kWh)"),
+                color=alt.Color("Scenario:N", scale=alt.Scale(range=["#1f77b4", "#d62728"])),
+                tooltip=["HourLabel", "Scenario", alt.Tooltip("kWh", format=".3f")]
+            )
+            .properties(height=320)
         )
-        .properties(height=300)
-    )
 
-    st.altair_chart(compare_chart, use_container_width=True)
+        st.altair_chart(clear_chart, use_container_width=True)
 
-    st.markdown("""
-    **Interpretation:**
-    - Smart DA charges during the cheapest DA slots.
-    - Smart DA+ID charges even more aggressively into low-ID price dips.
-    - Bars should differ if ID has meaningful dips.
-    """)
+        st.markdown("""
+        ### ✔ Interpretation
+        - Each time-of-day slot shows **two bars**: Smart DA (blue) and Smart DA+ID (red).
+        - Higher bar = more kWh charged in that 15-min slot.
+        - If red ≠ blue, ID optimisation is doing something different.
+        - Days with large ID dips will show big movement in Smart DA+ID.
+        """)
+
 
     # ============================================================
 # EXPANDER 3 — PRICES + CHARGING OVERLAY
