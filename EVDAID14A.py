@@ -91,24 +91,33 @@ def get_da_id_profiles_96(price_source, year, da_file, id_file):
         return synthetic_da_id_profiles_96()
 
     if price_source == "Built-in historical (data/…csv)":
-        da_path = DATA_DIR / f"da_{year}.csv"
-        id_path = DATA_DIR / f"id_{year}.csv"
-        if not da_path.exists() or not id_path.exists():
-            st.warning("Missing DA/ID files → using synthetic prices.")
-            return synthetic_da_id_profiles_96()
-        da_series = load_price_15min(da_path)
-        id_series = load_price_15min(id_path)
-        return series_to_96_slots(da_series), series_to_96_slots(id_series)
+    da_path = DATA_DIR / f"da_{year}.csv"
+    id_path = DATA_DIR / f"id_{year}.csv"
 
-    if price_source == "Upload DA+ID CSVs":
-        if da_file is None or id_file is None:
-            st.warning("Please upload both DA & ID files or use another source.")
-            return synthetic_da_id_profiles_96()
-        da_series = load_price_15min(da_file)
-        id_series = load_price_15min(id_file)
-        return series_to_96_slots(da_series), series_to_96_slots(id_series)
+    if not da_path.exists() or not id_path.exists():
+        st.warning("Missing DA/ID files → using synthetic prices.")
+        return synthetic_da_id_profiles_96()
 
-    return synthetic_da_id_profiles_96()
+    da_series = load_price_15min(da_path)
+    id_series = load_price_15min(id_path)
+
+    da_96 = series_to_96_slots(da_series) / 1000.0   # MWh → kWh
+    id_96 = series_to_96_slots(id_series) / 1000.0
+    return da_96, id_96
+
+
+if price_source == "Upload DA+ID CSVs":
+    if da_file is None or id_file is None:
+        st.warning("Please upload both DA & ID files or use another source.")
+        return synthetic_da_id_profiles_96()
+
+    da_series = load_price_15min(da_file)
+    id_series = load_price_15min(id_file)
+
+    da_96 = series_to_96_slots(da_series) / 1000.0   # MWh → kWh
+    id_96 = series_to_96_slots(id_series) / 1000.0
+    return da_96, id_96
+
     # ============================================================
 # EV OPTIMISATION UTILITIES (15-MIN / 96 SLOTS)
 # ============================================================
