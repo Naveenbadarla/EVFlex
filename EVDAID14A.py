@@ -226,8 +226,8 @@ from streamlit.components.v1 import html
 html("""
 <style>
 
-/* Center wrapper */
-.tesla-wrapper {
+/* Overall wrapper */
+.drive-wrapper {
     width: 100%;
     display: flex;
     justify-content: center;
@@ -236,44 +236,55 @@ html("""
 }
 
 /* Premium glass card */
-.tesla-card {
+.drive-card {
     width: 92%;
     max-width: 900px;
     padding: 45px 35px;
-    background: rgba(20, 20, 25, 0.75);
-    border-radius: 26px;
-    backdrop-filter: blur(18px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+    background: rgba(20,20,25,0.72);
+    border-radius: 25px;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 25px 65px rgba(0,0,0,0.55);
     position: relative;
+    overflow: hidden;
 }
 
-/* Tesla silhouette */
-.tesla-car {
+/* Tesla car container with drive-in motion */
+.drive-car {
+    position: relative;
     width: 420px;
     height: 120px;
     margin: 0 auto;
+    animation: driveIn 2.6s ease-out forwards;
+}
+
+/* Tesla body */
+.drive-body {
+    width: 420px;
+    height: 120px;
+    background: linear-gradient(180deg,#3a3d42,#2d2f34);
+    border-radius: 120px 120px 50px 50px;
     position: relative;
-    background: linear-gradient(180deg,#2b2d32,#1d1e22);
-    border-radius: 110px 110px 50px 50px;
-    box-shadow: 0 0 25px rgba(226,0,15,0.25);
+    box-shadow: 0 0 35px rgba(226,0,15,0.28);
+    animation: settleBounce 0.6s ease-out 2.6s forwards;
 }
 
 /* Wheels */
-.tesla-wheel {
+.drive-wheel {
     width: 64px;
     height: 64px;
     background: #000;
     border-radius: 50%;
-    border: 6px solid #777;
+    border: 6px solid #888;
     position: absolute;
     bottom: -24px;
+    animation: wheelRoll 2.2s linear forwards;
 }
-.tesla-wheel.left { left: 60px; }
-.tesla-wheel.right { right: 60px; }
+.drive-wheel.left { left: 58px; }
+.drive-wheel.right { right: 58px; }
 
-/* Charging port (glowing E.ON red) */
-.tesla-port {
+/* Charging port */
+.drive-port {
     width: 18px;
     height: 18px;
     background: #E2000F;
@@ -282,93 +293,136 @@ html("""
     right: -12px;
     top: 46%;
     transform: translateY(-50%);
-    box-shadow: 0 0 20px rgba(226,0,15,1);
-    animation: portPulse 1.6s infinite ease-in-out;
+    box-shadow: 0 0 18px rgba(226,0,15,1);
+    opacity: 0;
+    animation: fadePort 0.8s ease-in 2.6s forwards;
 }
 
-/* Charging cable */
-.tesla-cable {
+/* Cable appears after car stops */
+.drive-cable {
     width: 200px;
     height: 4px;
+    background: rgba(255,255,255,0.25);
     position: absolute;
     right: -200px;
     top: 50%;
-    background: rgba(255,255,255,0.25);
     border-radius: 3px;
+    opacity: 0;
+    animation: cableSlide 1s ease-out 3s forwards;
 }
 
-/* Charging pulse dots */
-.tesla-dot {
+/* Pulse effect along cable */
+.drive-dot {
     width: 12px;
     height: 12px;
     background: #ff3640;
     border-radius: 50%;
     position: absolute;
-    animation: cablePulse 1.6s infinite linear;
     box-shadow: 0 0 16px rgba(255,40,40,0.95);
+    opacity: 0;
+    animation: pulseCable 1.6s infinite linear;
+    animation-delay: 3.4s;
 }
 
-/* Charger station */
-.tesla-charger {
+/* Charger */
+.drive-charger {
     width: 110px;
     height: 210px;
     background: linear-gradient(180deg,#303035,#17171a);
     border-radius: 20px;
     position: absolute;
     right: -310px;
-    top: -35px;
+    top: -20px;
     border: 1px solid rgba(255,255,255,0.2);
     box-shadow: 0 0 35px rgba(255,255,255,0.08);
 }
 
 /* Charger screen */
-.tesla-charger-screen {
+.drive-charger-screen {
     width: 65px;
     height: 34px;
     background: #E2000F;
     border-radius: 6px;
     margin: 22px auto;
-    animation: screenGlow 2s infinite ease-in-out;
+    opacity: 0;
+    animation: fadeInScreen 0.8s ease-in 3s forwards, screenGlow 2s infinite 3.8s;
 }
 
 /* Battery container */
-.tesla-battery {
+.drive-battery {
     width: 300px;
     height: 34px;
-    border-radius: 10px;
     background: #0b0b0d;
-    margin: 40px auto 0 auto;
     border: 2px solid #555;
+    border-radius: 10px;
     position: relative;
     overflow: hidden;
+    margin: 50px auto 0 auto;
 }
 
-/* Animated battery fill */
-.tesla-battery-fill {
+/* Battery fill */
+.drive-battery-fill {
     height: 100%;
     width: 0%;
     background: linear-gradient(90deg,#E2000F,#ff4a4a);
-    animation: batteryFill 8s infinite;
+    animation: batteryFill 8s infinite 3.4s;
     box-shadow: 0 0 20px rgba(226,0,15,0.75);
 }
 
-/* ----- KEYFRAMES ----- */
+/* Keyframes -------------------------------------------- */
 
-@keyframes portPulse {
-    0%,100% { transform: scale(1); opacity: 0.8; }
-    50% { transform: scale(1.6); opacity: 1; }
+/* Car movement from left to center */
+@keyframes driveIn {
+    0% { transform: translateX(-650px); }
+    70% { transform: translateX(10px); }
+    100% { transform: translateX(0px); }
 }
 
-@keyframes cablePulse {
+/* Soft suspension bounce when stopping */
+@keyframes settleBounce {
+    0% { transform: translateY(-6px); }
+    60% { transform: translateY(4px); }
+    90% { transform: translateY(-2px); }
+    100% { transform: translateY(0px); }
+}
+
+/* Wheel rotation */
+@keyframes wheelRoll {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(450deg); }
+}
+
+/* Port fade-in */
+@keyframes fadePort {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Cable slides toward port */
+@keyframes cableSlide {
+    from { right: -200px; opacity: 0; }
+    to { right: -120px; opacity: 1; }
+}
+
+/* Pulsing dots along cable */
+@keyframes pulseCable {
     0% { left: 0px; opacity: 1; }
     100% { left: 190px; opacity: 0; }
 }
 
+/* Screen fade-in */
+@keyframes fadeInScreen {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Screen glowing */
 @keyframes screenGlow {
     0%,100% { background:#E2000F; opacity:0.7; }
     50% { background:#ff5151; opacity:1; }
 }
 
+/* Battery filling animation */
 @keyframes batteryFill {
     0% { width: 0%; }
     25% { width: 45%; }
@@ -379,35 +433,39 @@ html("""
 
 </style>
 
-<div class="tesla-wrapper">
-  <div class="tesla-card">
+<div class="drive-wrapper">
+  <div class="drive-card">
 
-      <div class="tesla-car">
-          <div class="tesla-wheel left"></div>
-          <div class="tesla-wheel right"></div>
-          <div class="tesla-port"></div>
-          <div class="tesla-cable"></div>
+      <div class="drive-car">
+          <div class="drive-body"></div>
 
-          <div class="tesla-dot" style="animation-delay: 0s;"></div>
-          <div class="tesla-dot" style="animation-delay: 0.35s;"></div>
-          <div class="tesla-dot" style="animation-delay: 0.7s;"></div>
+          <div class="drive-wheel left"></div>
+          <div class="drive-wheel right"></div>
 
-          <div class="tesla-charger">
-              <div class="tesla-charger-screen"></div>
+          <div class="drive-port"></div>
+          <div class="drive-cable"></div>
+
+          <div class="drive-dot" style="animation-delay:0s;"></div>
+          <div class="drive-dot" style="animation-delay:0.4s;"></div>
+          <div class="drive-dot" style="animation-delay:0.8s;"></div>
+
+          <div class="drive-charger">
+              <div class="drive-charger-screen"></div>
           </div>
       </div>
 
-      <div class="tesla-battery">
-          <div class="tesla-battery-fill"></div>
+      <div class="drive-battery">
+          <div class="drive-battery-fill"></div>
       </div>
 
-      <h3 style='text-align:center;margin-top:26px;color:white;font-weight:300;'>
-          Smart Charging – Tesla Style
+      <h3 style='text-align:center;margin-top:30px;color:white;font-weight:300;'>
+          Smart Charging – Tesla Arriving…
       </h3>
 
   </div>
 </div>
-""", height=500)
+""", height=550)
+
 
 
 
