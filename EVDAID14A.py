@@ -866,174 +866,181 @@ if page == "EV Optimizer (15-min)":
             )
 
 # ============================================================
-# PRICE MANAGER PAGE (15-MIN CLEANER VERSION)
+# PRICE MANAGER 2.0 — Robust DA/ID Import + Cleaning System
 # ============================================================
 
 if page == "Price Manager (15-min)":
 
-    st.title("📈 Price Manager – Import & Clean 15-min DA/ID")
+    st.title("📈 Price Manager 2.0 — Robust 15-min DA/ID Loader")
 
-    st.markdown(
-        """
-        Upload raw ENTSO-E (or similar) CSV files that contain **15-minute**
-        Day-Ahead (DA) or Intraday (ID) price data.
+    st.markdown("""
+    Price Manager 2.0 allows you to upload *any form* of Day-Ahead (DA) or Intraday (ID)
+    price files and automatically converts them into **96×15-minute** price profiles.
 
-        This tool will:
-        - Detect datetime and price columns  
-        - Convert €/MWh → €/kWh  
-        - Resample to an exact 15-minute frequency  
-        - Save a clean file to `/data` for historical use in the optimizer  
-
-        ⚠️ This is a simplified utility:
-        - No charts  
-        - No advanced analysis  
-        - Only preview + cleaning + saving  
-        """
-    )
+    Supported inputs:
+    - ENTSO-E CSV / Excel
+    - EPEX / EEX hourly DA data
+    - GDM datasets
+    - Files with MTU ranges (e.g., “2023-01-01 00:00 – 01:00”)
+    - Files in €/MWh or €/kWh
+    - Files with irregular timestamps
+    """)
 
     # -------------------------------------------
-    # Select whether DA or ID file is being uploaded
+    # Select DA or ID
     # -------------------------------------------
-    upload_type = st.selectbox(
-        "Select price type to import",
+    price_type = st.selectbox(
+        "Select price type",
         ["Day-Ahead (DA)", "Intraday (ID)"]
     )
 
-    # File upload
     raw_file = st.file_uploader(
-        "Upload raw price CSV",
-        type=["csv"],
-        help="Upload DA/ID CSV file containing 15-min prices."
+        "Upload raw DA/ID file (CSV or Excel)",
+        type=["csv", "xlsx", "xls"],
+        help="Upload raw file — all formats supported."
     )
 
     if raw_file is not None:
-        df_raw = pd.read_csv(raw_file)
+
+        # AUTO LOAD CSV OR EXCEL
+        try:
+            if raw_file.name.endswith(".csv"):
+                df_raw = pd.read_csv(raw_file)
+            else:
+                df_raw = pd.read_excel(raw_file)
+        except Exception as e:
+            st.error(f"Failed to read file: {e}")
+            st.stop()
 
         st.subheader("🔍 Raw File Preview")
         st.dataframe(df_raw.head(), use_container_width=True)
 
-        # -------------------------------------------
-        # Auto-detect datetime & price columns
-        # -------------------------------------------
-        dt_col = None
-        price_col = None
+        # ============================================================
+        # STEP 1 — Detect datetime column
+        # ============================================================
 
-        # Detect datetime column
-        for c in df_raw.columns:
-            if ("MTU" in c) or ("date" in c.lower()) or ("time" in c.lower()):
-                dt_col = c
-                break
+        dt_candidates = [
+            c for c in df_raw.columns
+            if any(k in c.lower() for k in ["date", "time", "mtu"])
+        ]
 
-        # Detect price column
-        for c in df_raw.columns:
-            if ("MWh" in c) or ("price" in c.lower()):
-                price_col = c
-                break
+        if not dt_candidates:
+            st.error("❌ Could not detect a datetime column.")
+            st.stop()
 
-        if dt_col is None or price_col is None:
-            st.error("❌ Could not find datetime or price column automatically.")
+        dt_col = dt_candidates[0]
+
+        # Try to split MTU ranges
+        df_raw[dt_col] = df_raw[dt_col].astype(str).str.split("–").str[0].str.strip()
+
+        # Parse datetime
+        df_raw["datetime"] = pd.to_datetime(df_raw[dt_col], errors="coerce")
+
+        # Drop invalid rows
+        df_raw = df_raw.dropna(subset=["datetime"])
+
+        # ============================================================
+        # STEP 2 — Detect price column
+        # ============================================================
+
+        price_candidates = [
+            c for c in df_raw.columns
+            if any(k in c.lower() for k in ["price", "eur", "mwh", "kwh", "value"])
+        ]
+
+        if not price_candidates:
+            st.error("❌ No price column detected.")
+            st.stop()
+
+        price_col = price_candidates[-1]  # usually last one
+
+        # Convert to numeric
+        df_raw["price"] = pd.to_numeric(df_raw[price_col], errors="coerce")
+        df_raw = df_raw.dropna(subset=["price"])
+
+        st.success(f"Detected datetime column: **{dt_col}**")
+        st.success(f"Detected price column: **{price_col}**")
+
+        # ============================================================
+        # STEP 3 — Convert ALL inputs → €/MWh uniformly
+        # ============================================================
+
+        # If values look like €/kWh (e.g. <10), multiply
+        if df_raw["price"].mean() < 10:
+            df_raw["price_eur_mwh"] = df_raw["price"] * 1000
         else:
-            st.success(f"Detected datetime column: **{dt_col}**")
-            st.success(f"Detected price column: **{price_col}**")
+            df_raw["price_eur_mwh"] = df_raw["price"]
 
-            # -------------------------------------------
-            # Clean datetime column
-            # ENTSO-E format like: "2023-07-01 00:00 – 00:15"
-            # -------------------------------------------
-            try:
-                dt_clean = df_raw[dt_col].astype(str).str.split("-").str[0].str.strip()
-                df_raw["datetime"] = pd.to_datetime(dt_clean)
-            except:
-                df_raw["datetime"] = pd.to_datetime(df_raw[dt_col], errors="coerce")
+        st.info(f"Price range: {df_raw['price_eur_mwh'].min():.2f} – {df_raw['price_eur_mwh'].max():.2f} €/MWh")
 
-            # Convert €/MWh → €/kWh
-            df_raw["price_eur_mwh"] = pd.to_numeric(df_raw[price_col], errors="coerce")
-            df = df_raw.dropna(subset=["datetime", "price_eur_mwh"]).copy()
-            df["price_eur_kwh"] = df["price_eur_mwh"] / 1000.0
+        # ============================================================
+        # STEP 4 — Normalize to EXACT 15-minute resolution
+        # ============================================================
 
-            st.subheader("🧹 Cleaned Data Preview")
-            st.dataframe(df.head(), use_container_width=True)
+        s = df_raw.set_index("datetime")["price_eur_mwh"].sort_index()
 
-            # -------------------------------------------
-            # EXACT 15-min resample
-            # -------------------------------------------
-            df_15 = (
-                df.set_index("datetime")["price_eur_kwh"]
-                .resample("15min")
-                .mean()
-            ).dropna()
+        # Detect if hourly
+        freq_guess = pd.infer_freq(s.index)
+        st.write("Detected frequency:", freq_guess)
 
-            if len(df_15) < 96:
-                st.warning(
-                    "⚠️ This file does not contain a full 96 quarter-hours. "
-                    "Make sure your raw file has complete 15-min data."
-                )
+        if freq_guess in ["H", "60T"]:
+            st.warning("Hourly data detected → converting to 15-min resolution (×4).")
+            s_15 = s.resample("15min").ffill()
+        else:
+            s_15 = s.resample("15min").mean().ffill()
 
-            # -------------------------------------------
-            # Choose which year this dataset belongs to
-            # -------------------------------------------
-            year_save = st.number_input(
-                "Assign this dataset to year:",
-                min_value=2000, max_value=2100,
-                value=2023, step=1
-            )
+        # Final validity check
+        if len(s_15) < 96:
+            st.error("❌ Could not extract one full 96 quarter-hour day from this file.")
+            st.stop()
 
-            # -------------------------------------------
-            # Save cleaned file
-            # -------------------------------------------
-            if st.button("💾 Save cleaned 15-min price file"):
-                name = "da" if upload_type.startswith("Day") else "id"
-                out_path = DATA_DIR / f"{name}_{int(year_save)}.csv"
+        # Extract FIRST 96 values (typical day)
+        day_values = s_15.iloc[:96].reset_index()
+        day_values.columns = ["datetime", "price_eur_mwh"]
 
-                out_df = pd.DataFrame({
-                    "datetime": df_15.index,
-                    "price_eur_mwh": df_15.values * 1000,  # store as €/MWh like ENTSO-E
-                })
+        st.subheader("🧹 Cleaned 96×15-min Profile")
+        st.dataframe(day_values.head(), use_container_width=True)
 
-                out_df.to_csv(out_path, index=False)
-                st.success(f"Saved cleaned file to: `{out_path}`")
-    # -------------------------------------------
-    # SHOW EXISTING CLEANED FILES
-    # -------------------------------------------
+        # ============================================================
+        # STEP 5 — Save cleaned file
+        # ============================================================
 
-    st.subheader("📂 Existing cleaned 15-min price files")
+        year_save = st.number_input(
+            "Assign cleaned dataset to year:",
+            min_value=2000, max_value=2100, value=2023
+        )
+
+        if st.button("💾 Save cleaned 15-min file"):
+            fname = "da" if price_type.startswith("Day") else "id"
+            out_path = DATA_DIR / f"{fname}_{year_save}.csv"
+            day_values.to_csv(out_path, index=False)
+            st.success(f"Saved to `{out_path}`")
+
+    # ============================================================
+    # FILE MANAGEMENT (DELETE / DOWNLOAD)
+    # ============================================================
+
+    st.subheader("📂 Data folder contents")
 
     files = sorted(DATA_DIR.glob("*.csv"))
+
     if not files:
-        st.info("No cleaned DA/ID files found in `/data` yet.")
+        st.info("No CSV files in /data yet.")
     else:
         for f in files:
-            st.write(f"• `{f.name}`")
-    # ============================================================
-    # DELETE FILES UI
-    # ============================================================
+            col1, col2, col3 = st.columns([4,1,1])
 
-    st.subheader("🗑️ Delete files from /data")
+            with col1:
+                st.write(f"**{f.name}**")
 
-    delete_mode = st.checkbox("Enable delete mode")
+            with col2:
+                st.download_button("⬇️", data=open(f,"rb").read(),
+                                   file_name=f.name, key=f"dl_{f.name}")
 
-    if delete_mode:
-
-        st.warning("Delete mode is enabled. Be careful — deleted files cannot be recovered.")
-
-        data_files = sorted(DATA_DIR.glob("*.csv"))
-
-        if not data_files:
-            st.info("No files available to delete.")
-        else:
-            for f in data_files:
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.write(f"**{f.name}**")
-                with col2:
-                    if st.button("Delete", key=f"del_{f.name}"):
-                        try:
-                            f.unlink()
-                            st.success(f"Deleted: {f.name}")
-                        except Exception as e:
-                            st.error(f"Failed to delete {f.name}: {e}")
-
-            st.info("Refresh the page to update the file list after deleting.")
+            with col3:
+                if st.button("🗑️", key=f"del_{f.name}"):
+                    f.unlink()
+                    st.success(f"Deleted {f.name}. Refresh the page.")
 
 # ============================================================
 # FOOTER (APPEARS ON EVERY PAGE)
