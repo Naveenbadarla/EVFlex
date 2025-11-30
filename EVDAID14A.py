@@ -226,129 +226,189 @@ from streamlit.components.v1 import html
 html("""
 <style>
 
-.ev-wrapper {
+/* Center wrapper */
+.tesla-wrapper {
     width: 100%;
     display: flex;
     justify-content: center;
-    margin-top: 35px;
+    margin-top: 40px;
     margin-bottom: 40px;
 }
 
-.ev-card {
-    background: linear-gradient(145deg, #1e1f22, #25262b);
-    border-radius: 24px;
-    padding: 40px 30px;
-    width: 95%;
+/* Premium glass card */
+.tesla-card {
+    width: 92%;
     max-width: 900px;
-    box-shadow: 0 10px 45px rgba(0,0,0,0.7);
-    border: 1px solid rgba(255,255,255,0.10);
-}
-
-.ev-car {
-    width: 240px;
-    height: 110px;
-    border-radius: 28px;
-    background: linear-gradient(180deg, #3a3d42, #2d2f34 80%);
+    padding: 45px 35px;
+    background: rgba(20, 20, 25, 0.75);
+    border-radius: 26px;
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
     position: relative;
-    margin: 0 auto;
-    box-shadow: 0 0 30px rgba(255,0,0,0.25);
 }
 
-.ev-wheel {
-    width: 46px;
-    height: 46px;
+/* Tesla silhouette */
+.tesla-car {
+    width: 420px;
+    height: 120px;
+    margin: 0 auto;
+    position: relative;
+    background: linear-gradient(180deg,#2b2d32,#1d1e22);
+    border-radius: 110px 110px 50px 50px;
+    box-shadow: 0 0 25px rgba(226,0,15,0.25);
+}
+
+/* Wheels */
+.tesla-wheel {
+    width: 64px;
+    height: 64px;
     background: #000;
     border-radius: 50%;
-    border: 5px solid #8b8b8b;
+    border: 6px solid #777;
     position: absolute;
-    bottom: -20px;
+    bottom: -24px;
 }
-.ev-wheel.left { left: 32px; }
-.ev-wheel.right { right: 32px; }
+.tesla-wheel.left { left: 60px; }
+.tesla-wheel.right { right: 60px; }
 
-.ev-port {
-    width: 16px;
-    height: 16px;
+/* Charging port (glowing E.ON red) */
+.tesla-port {
+    width: 18px;
+    height: 18px;
     background: #E2000F;
     border-radius: 50%;
     position: absolute;
     right: -12px;
-    top: 42px;
-    box-shadow: 0 0 14px rgba(226,0,15,1);
+    top: 46%;
+    transform: translateY(-50%);
+    box-shadow: 0 0 20px rgba(226,0,15,1);
+    animation: portPulse 1.6s infinite ease-in-out;
 }
 
-.ev-cable {
-    width: 140px;
+/* Charging cable */
+.tesla-cable {
+    width: 200px;
     height: 4px;
-    background: rgba(255,255,255,0.25);
     position: absolute;
-    right: -140px;
-    top: 50px;
-    border-radius: 2px;
+    right: -200px;
+    top: 50%;
+    background: rgba(255,255,255,0.25);
+    border-radius: 3px;
 }
 
-.ev-dot {
-    width: 10px;
-    height: 10px;
+/* Charging pulse dots */
+.tesla-dot {
+    width: 12px;
+    height: 12px;
     background: #ff3640;
     border-radius: 50%;
     position: absolute;
-    animation: cablePulse 1.8s infinite linear;
-    box-shadow: 0 0 12px rgba(255,40,40,0.9);
+    animation: cablePulse 1.6s infinite linear;
+    box-shadow: 0 0 16px rgba(255,40,40,0.95);
 }
 
-.ev-charger {
-    width: 90px;
-    height: 155px;
-    background: linear-gradient(180deg, #2e3036, #1a1a1c 85%);
-    border-radius: 16px;
+/* Charger station */
+.tesla-charger {
+    width: 110px;
+    height: 210px;
+    background: linear-gradient(180deg,#303035,#17171a);
+    border-radius: 20px;
     position: absolute;
-    right: -250px;
-    top: -12px;
-    border: 1px solid rgba(255,255,255,0.15);
+    right: -310px;
+    top: -35px;
+    border: 1px solid rgba(255,255,255,0.2);
+    box-shadow: 0 0 35px rgba(255,255,255,0.08);
 }
 
-.ev-charger-screen {
-    width: 50px;
-    height: 28px;
+/* Charger screen */
+.tesla-charger-screen {
+    width: 65px;
+    height: 34px;
     background: #E2000F;
     border-radius: 6px;
-    margin: 18px auto;
+    margin: 22px auto;
+    animation: screenGlow 2s infinite ease-in-out;
+}
+
+/* Battery container */
+.tesla-battery {
+    width: 300px;
+    height: 34px;
+    border-radius: 10px;
+    background: #0b0b0d;
+    margin: 40px auto 0 auto;
+    border: 2px solid #555;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Animated battery fill */
+.tesla-battery-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg,#E2000F,#ff4a4a);
+    animation: batteryFill 8s infinite;
+    box-shadow: 0 0 20px rgba(226,0,15,0.75);
+}
+
+/* ----- KEYFRAMES ----- */
+
+@keyframes portPulse {
+    0%,100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.6); opacity: 1; }
 }
 
 @keyframes cablePulse {
     0% { left: 0px; opacity: 1; }
-    100% { left: 130px; opacity: 0; }
+    100% { left: 190px; opacity: 0; }
+}
+
+@keyframes screenGlow {
+    0%,100% { background:#E2000F; opacity:0.7; }
+    50% { background:#ff5151; opacity:1; }
+}
+
+@keyframes batteryFill {
+    0% { width: 0%; }
+    25% { width: 45%; }
+    50% { width: 70%; }
+    75% { width: 95%; }
+    100% { width: 0%; }
 }
 
 </style>
 
-<div class="ev-wrapper">
-    <div class="ev-card">
-        <div style="position: relative; height: 180px;">
+<div class="tesla-wrapper">
+  <div class="tesla-card">
 
-            <div class="ev-car">
-                <div class="ev-wheel left"></div>
-                <div class="ev-wheel right"></div>
-                <div class="ev-port"></div>
-                <div class="ev-cable"></div>
+      <div class="tesla-car">
+          <div class="tesla-wheel left"></div>
+          <div class="tesla-wheel right"></div>
+          <div class="tesla-port"></div>
+          <div class="tesla-cable"></div>
 
-                <div class="ev-dot" style="animation-delay: 0s;"></div>
-                <div class="ev-dot" style="animation-delay: 0.35s;"></div>
-                <div class="ev-dot" style="animation-delay: 0.7s;"></div>
+          <div class="tesla-dot" style="animation-delay: 0s;"></div>
+          <div class="tesla-dot" style="animation-delay: 0.35s;"></div>
+          <div class="tesla-dot" style="animation-delay: 0.7s;"></div>
 
-                <div class="ev-charger">
-                    <div class="ev-charger-screen"></div>
-                </div>
-            </div>
+          <div class="tesla-charger">
+              <div class="tesla-charger-screen"></div>
+          </div>
+      </div>
 
-        </div>
-        <h3 style='text-align:center;margin-top:22px;color:white;font-weight:300;'>
-            Smart Charging… Optimising Your Energy Costs
-        </h3>
-    </div>
+      <div class="tesla-battery">
+          <div class="tesla-battery-fill"></div>
+      </div>
+
+      <h3 style='text-align:center;margin-top:26px;color:white;font-weight:300;'>
+          Smart Charging – Tesla Style
+      </h3>
+
+  </div>
 </div>
-""", height=350)
+""", height=500)
+
 
 
 
