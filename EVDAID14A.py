@@ -501,268 +501,279 @@ if page == "EV Optimizer (15-min)":
     )
 
     # ============================================================
+    # ============================================================
+# VIEW MODE: SINGLE DAY vs FULL YEAR
+# ============================================================
+
+mode = st.radio(
+    "Simulation mode",
+    ["Single Day", "Full Year"],
+    help="Single Day = optimise a typical day. Full Year = simulate all 365 days."
+)
+
+if mode == "Single Day":
     # COST COMPARISON TABLE
-    # ============================================================
-
-    results_df = pd.DataFrame([
-        ["Baseline (flat retail)", annual_baseline, eff_price(annual_baseline)],
-        ["Retail DA-indexed", annual_da_indexed, eff_price(annual_da_indexed)],
-        ["Smart DA optimisation", annual_smart_da, eff_price(annual_smart_da)],
-        ["Smart DA+ID optimisation", annual_smart_full, eff_price(annual_smart_full)],
-    ], columns=["Scenario", "Annual Cost (€)", "Effective Price (€/kWh)"])
-
-    best = results_df.loc[results_df["Annual Cost (€)"].idxmin()]
-
-    st.subheader("Annual Cost Comparison")
-    st.dataframe(
-        results_df.style.format({
-            "Annual Cost (€)": "{:.0f}",
-            "Effective Price (€/kWh)": "{:.3f}"
-        }),
-        use_container_width=True
-    )
-
-    st.success(
-        f"**Best scenario:** {best['Scenario']} → "
-        f"**{best['Annual Cost (€)']:.0f} € / year** "
-        f"({best['Effective Price (€/kWh)']:.3f} €/kWh)"
-    )
-
-    # ============================================================
-    # COST BAR CHART
-    # ============================================================
-
-    st.subheader("Cost Comparison (Bar Chart)")
-
-    cost_chart = (
-        alt.Chart(results_df)
-        .mark_bar()
-        .encode(
-            x=alt.X("Scenario:N", sort=None),
-            y=alt.Y("Annual Cost (€):Q"),
-            tooltip=[
-                "Scenario",
-                alt.Tooltip("Annual Cost (€):Q", format=".0f"),
-                alt.Tooltip("Effective Price (€/kWh):Q", format=".3f")
-            ]
-        )
-        .properties(height=330)
-    )
-
-    st.altair_chart(cost_chart, use_container_width=True)
         # ============================================================
-    # SIMPLE CHARGING PATTERN VISUALISATION (15-min → hourly)
-    # ============================================================
 
-    st.subheader("🔌 Charging Pattern (Arrival → Departure Window)")
+        results_df = pd.DataFrame([
+            ["Baseline (flat retail)", annual_baseline, eff_price(annual_baseline)],
+            ["Retail DA-indexed", annual_da_indexed, eff_price(annual_da_indexed)],
+            ["Smart DA optimisation", annual_smart_da, eff_price(annual_smart_da)],
+            ["Smart DA+ID optimisation", annual_smart_full, eff_price(annual_smart_full)],
+        ], columns=["Scenario", "Annual Cost (€)", "Effective Price (€/kWh)"])
 
-    # ------------------------------
-    # Convert 96-slot (15-min) charge arrays into 24 hourly totals
-    # ------------------------------
-    # Each hour = sum of its 4 quarter-hours
-    baseline_hourly = charge_baseline_96.reshape(24, 4).sum(axis=1)
-    da_indexed_hourly = charge_da_indexed_96.reshape(24, 4).sum(axis=1)
-    smart_da_hourly = charge_smart_da_96.reshape(24, 4).sum(axis=1)
-    smart_full_hourly = charge_smart_full_96.reshape(24, 4).sum(axis=1)
+        best = results_df.loc[results_df["Annual Cost (€)"].idxmin()]
 
-    # ------------------------------
-    # Build the arrival → departure hour window (correct order)
-    # ------------------------------
-    if arrival_hour <= departure_hour:
-        hours_window = list(range(arrival_hour, departure_hour))
-    else:
-        hours_window = list(range(arrival_hour, 24)) + list(range(0, departure_hour))
-
-    # ------------------------------
-    # Build DataFrame for the chart
-    # ------------------------------
-    charging_pattern_df = pd.DataFrame({
-        "Hour": hours_window,
-        "Baseline (kWh)": [baseline_hourly[h] for h in hours_window],
-        "DA-indexed (kWh)": [da_indexed_hourly[h] for h in hours_window],
-        "Smart DA (kWh)": [smart_da_hourly[h] for h in hours_window],
-        "Smart DA+ID (kWh)": [smart_full_hourly[h] for h in hours_window],
-    })
-
-    charging_long = charging_pattern_df.melt(
-        id_vars="Hour",
-        var_name="Scenario",
-        value_name="kWh"
-    )
-
-    # ------------------------------
-    # Cleanest view: one panel per scenario
-    # ------------------------------
-    charging_chart = (
-        alt.Chart(charging_long)
-        .mark_bar()
-        .encode(
-            x=alt.X(
-                "Hour:O",
-                title="Hour of Day",
-                sort=hours_window  # preserve arrival→departure order
-            ),
-            y=alt.Y("kWh:Q", title="Charging (kWh)"),
-            color="Scenario:N",
-            column=alt.Column(
-                "Scenario:N",
-                header=alt.Header(labelAngle=0, labelFontSize=12)
-            ),
-            tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")]
+        st.subheader("Annual Cost Comparison")
+        st.dataframe(
+            results_df.style.format({
+                "Annual Cost (€)": "{:.0f}",
+                "Effective Price (€/kWh)": "{:.3f}"
+            }),
+            use_container_width=True
         )
-        .properties(height=300)
-    )
 
-    st.altair_chart(charging_chart, use_container_width=True)
-
-    st.markdown(
-        """
-        **How to read this chart:**
-
-        - Only hours where the EV is connected are shown (between arrival and departure).
-        - Each panel is one scenario:
-            - Baseline (flat retail)
-            - Retail DA-indexed
-            - Smart DA
-            - Smart DA+ID
-        - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
-        """
-    )
-    # ============================================================
-# EXPANDER 1 — DA vs ID PRICE CURVES
-# ============================================================
-
-with st.expander("📈 Prices: DA vs ID (15-minute resolution)"):
-
-    price_df = pd.DataFrame({
-        "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
-        "DA (€/kWh)": da_96,
-        "ID (€/kWh)": id_96
-    })
-
-    price_long = price_df.melt("Datetime", var_name="Curve", value_name="€/kWh")
-
-    price_chart = (
-        alt.Chart(price_long)
-        .mark_line(point=False)
-        .encode(
-            x="Datetime:T",
-            y="€/kWh:Q",
-            color="Curve:N",
-            tooltip=["Datetime", "Curve", alt.Tooltip("€/kWh", format=".4f")]
+        st.success(
+            f"**Best scenario:** {best['Scenario']} → "
+            f"**{best['Annual Cost (€)']:.0f} € / year** "
+            f"({best['Effective Price (€/kWh)']:.3f} €/kWh)"
         )
-        .properties(height=300)
-    )
 
-    st.altair_chart(price_chart, use_container_width=True)
+        # ============================================================
+        # COST BAR CHART
+        # ============================================================
 
-    st.markdown("""
-    **Interpretation:**
-    - DA curve shows base day-ahead prices.
-    - ID curve is more volatile and shows real intraday opportunities.
-    - Smart DA+ID will shift charging into low-ID dips.
-    """)
+        st.subheader("Cost Comparison (Bar Chart)")
 
-# ============================================================
-# EXPANDER 2 — MUCH CLEARER Charging Comparison (DA vs DA+ID)
-# ============================================================
-
-with st.expander("🔌 Clear Charging Comparison: Smart DA vs Smart DA+ID"):
-
-    # Build a cleaned dataframe only with hours where at least one scenario charges
-    comp_rows = []
-    for h in range(96):
-        da_val = float(charge_smart_da_96[h])
-        full_val = float(charge_smart_full_96[h])
-        if da_val > 0 or full_val > 0:
-            comp_rows.append({
-                "Hour": h,
-                "Smart DA (kWh)": da_val,
-                "Smart DA+ID (kWh)": full_val
-            })
-
-    if len(comp_rows) == 0:
-        st.info("No charging occurs during the selected window.")
-    else:
-        compare_df = pd.DataFrame(comp_rows)
-
-        # Convert quarter-hour index to hour of day text
-        compare_df["HourLabel"] = compare_df["Hour"].apply(lambda x: f"{(x//4):02d}:{(x%4)*15:02d}")
-
-        # Melt for grouped bar format
-        compare_long = compare_df.melt("HourLabel", var_name="Scenario", value_name="kWh")
-
-        clear_chart = (
-            alt.Chart(compare_long)
+        cost_chart = (
+            alt.Chart(results_df)
             .mark_bar()
             .encode(
-                x=alt.X("HourLabel:O", title="Time of Day"),
-                y=alt.Y("kWh:Q", title="Charging (kWh)"),
-                color=alt.Color("Scenario:N", scale=alt.Scale(range=["#1f77b4", "#d62728"])),
-                tooltip=["HourLabel", "Scenario", alt.Tooltip("kWh", format=".3f")]
+                x=alt.X("Scenario:N", sort=None),
+                y=alt.Y("Annual Cost (€):Q"),
+                tooltip=[
+                    "Scenario",
+                    alt.Tooltip("Annual Cost (€):Q", format=".0f"),
+                    alt.Tooltip("Effective Price (€/kWh):Q", format=".3f")
+                ]
             )
-            .properties(height=320)
+            .properties(height=330)
         )
 
-        st.altair_chart(clear_chart, use_container_width=True)
+        st.altair_chart(cost_chart, use_container_width=True)
+            # ============================================================
+        # SIMPLE CHARGING PATTERN VISUALISATION (15-min → hourly)
+        # ============================================================
 
-        st.markdown("""
-        ### ✔ Interpretation
-        - Each time-of-day slot shows **two bars**: Smart DA (blue) and Smart DA+ID (red).
-        - Higher bar = more kWh charged in that 15-min slot.
-        - If red ≠ blue, ID optimisation is doing something different.
-        - Days with large ID dips will show big movement in Smart DA+ID.
-        """)
+        st.subheader("🔌 Charging Pattern (Arrival → Departure Window)")
 
+        # ------------------------------
+        # Convert 96-slot (15-min) charge arrays into 24 hourly totals
+        # ------------------------------
+        # Each hour = sum of its 4 quarter-hours
+        baseline_hourly = charge_baseline_96.reshape(24, 4).sum(axis=1)
+        da_indexed_hourly = charge_da_indexed_96.reshape(24, 4).sum(axis=1)
+        smart_da_hourly = charge_smart_da_96.reshape(24, 4).sum(axis=1)
+        smart_full_hourly = charge_smart_full_96.reshape(24, 4).sum(axis=1)
 
-    # ============================================================
-# EXPANDER 3 — PRICES + CHARGING OVERLAY
-# ============================================================
+        # ------------------------------
+        # Build the arrival → departure hour window (correct order)
+        # ------------------------------
+        if arrival_hour <= departure_hour:
+            hours_window = list(range(arrival_hour, departure_hour))
+        else:
+            hours_window = list(range(arrival_hour, 24)) + list(range(0, departure_hour))
 
-with st.expander("📉 Prices + Charging Overlay (All Scenarios)"):
-
-    def overlay_chart(prices, charging, title):
-        df = pd.DataFrame({
-            "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
-            "Price (€/kWh)": prices,
-            "Charging (kWh)": charging
+        # ------------------------------
+        # Build DataFrame for the chart
+        # ------------------------------
+        charging_pattern_df = pd.DataFrame({
+            "Hour": hours_window,
+            "Baseline (kWh)": [baseline_hourly[h] for h in hours_window],
+            "DA-indexed (kWh)": [da_indexed_hourly[h] for h in hours_window],
+            "Smart DA (kWh)": [smart_da_hourly[h] for h in hours_window],
+            "Smart DA+ID (kWh)": [smart_full_hourly[h] for h in hours_window],
         })
 
-        price_line = alt.Chart(df).mark_line(color="orange").encode(
-            x="Datetime:T",
-            y="Price (€/kWh):Q"
+        charging_long = charging_pattern_df.melt(
+            id_vars="Hour",
+            var_name="Scenario",
+            value_name="kWh"
         )
 
-        charge_bars = alt.Chart(df).mark_bar(opacity=0.5, color="steelblue").encode(
-            x="Datetime:T",
-            y="Charging (kWh):Q"
+        # ------------------------------
+        # Cleanest view: one panel per scenario
+        # ------------------------------
+        charging_chart = (
+            alt.Chart(charging_long)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "Hour:O",
+                    title="Hour of Day",
+                    sort=hours_window  # preserve arrival→departure order
+                ),
+                y=alt.Y("kWh:Q", title="Charging (kWh)"),
+                color="Scenario:N",
+                column=alt.Column(
+                    "Scenario:N",
+                    header=alt.Header(labelAngle=0, labelFontSize=12)
+                ),
+                tooltip=["Scenario", "Hour", alt.Tooltip("kWh:Q", format=".2f")]
+            )
+            .properties(height=300)
         )
 
-        return (price_line + charge_bars).properties(height=280, title=title)
+        st.altair_chart(charging_chart, use_container_width=True)
 
-    st.altair_chart(
-        overlay_chart(da_96, charge_da_indexed_96, "Retail DA-indexed: Prices + Charging"),
-        use_container_width=True
-    )
+        st.markdown(
+            """
+            **How to read this chart:**
 
-    st.altair_chart(
-        overlay_chart(da_96, charge_smart_da_96, "Smart DA: Prices + Charging"),
-        use_container_width=True
-    )
+            - Only hours where the EV is connected are shown (between arrival and departure).
+            - Each panel is one scenario:
+                - Baseline (flat retail)
+                - Retail DA-indexed
+                - Smart DA
+                - Smart DA+ID
+            - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
+            """
+        )
+        # ============================================================
+    # EXPANDER 1 — DA vs ID PRICE CURVES
+    # ============================================================
 
-    st.altair_chart(
-        overlay_chart(effective_da_id_96, charge_smart_full_96, "Smart DA+ID: Prices + Charging"),
-        use_container_width=True
-    )
+    with st.expander("📈 Prices: DA vs ID (15-minute resolution)"):
 
-    st.markdown("""
-    **Interpretation:**
-    - Blue bars = charging amount  
-    - Orange line = price  
-    - Smart DA puts bars where orange line is lowest  
-    - Smart DA+ID uses an even more volatile price curve → should shift bars further into ID dips  
-    - If plots look identical, ID dips may be small or time window may not include them  
-    """)
+        price_df = pd.DataFrame({
+            "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
+            "DA (€/kWh)": da_96,
+            "ID (€/kWh)": id_96
+        })
+
+        price_long = price_df.melt("Datetime", var_name="Curve", value_name="€/kWh")
+
+        price_chart = (
+            alt.Chart(price_long)
+            .mark_line(point=False)
+            .encode(
+                x="Datetime:T",
+                y="€/kWh:Q",
+                color="Curve:N",
+                tooltip=["Datetime", "Curve", alt.Tooltip("€/kWh", format=".4f")]
+            )
+            .properties(height=300)
+        )
+
+        st.altair_chart(price_chart, use_container_width=True)
+
+        st.markdown("""
+        **Interpretation:**
+        - DA curve shows base day-ahead prices.
+        - ID curve is more volatile and shows real intraday opportunities.
+        - Smart DA+ID will shift charging into low-ID dips.
+        """)
+
+    # ============================================================
+    # EXPANDER 2 — MUCH CLEARER Charging Comparison (DA vs DA+ID)
+    # ============================================================
+
+    with st.expander("🔌 Clear Charging Comparison: Smart DA vs Smart DA+ID"):
+
+        # Build a cleaned dataframe only with hours where at least one scenario charges
+        comp_rows = []
+        for h in range(96):
+            da_val = float(charge_smart_da_96[h])
+            full_val = float(charge_smart_full_96[h])
+            if da_val > 0 or full_val > 0:
+                comp_rows.append({
+                    "Hour": h,
+                    "Smart DA (kWh)": da_val,
+                    "Smart DA+ID (kWh)": full_val
+                })
+
+        if len(comp_rows) == 0:
+            st.info("No charging occurs during the selected window.")
+        else:
+            compare_df = pd.DataFrame(comp_rows)
+
+            # Convert quarter-hour index to hour of day text
+            compare_df["HourLabel"] = compare_df["Hour"].apply(lambda x: f"{(x//4):02d}:{(x%4)*15:02d}")
+
+            # Melt for grouped bar format
+            compare_long = compare_df.melt("HourLabel", var_name="Scenario", value_name="kWh")
+
+            clear_chart = (
+                alt.Chart(compare_long)
+                .mark_bar()
+                .encode(
+                    x=alt.X("HourLabel:O", title="Time of Day"),
+                    y=alt.Y("kWh:Q", title="Charging (kWh)"),
+                    color=alt.Color("Scenario:N", scale=alt.Scale(range=["#1f77b4", "#d62728"])),
+                    tooltip=["HourLabel", "Scenario", alt.Tooltip("kWh", format=".3f")]
+                )
+                .properties(height=320)
+            )
+
+            st.altair_chart(clear_chart, use_container_width=True)
+
+            st.markdown("""
+            ### ✔ Interpretation
+            - Each time-of-day slot shows **two bars**: Smart DA (blue) and Smart DA+ID (red).
+            - Higher bar = more kWh charged in that 15-min slot.
+            - If red ≠ blue, ID optimisation is doing something different.
+            - Days with large ID dips will show big movement in Smart DA+ID.
+            """)
+
+
+        # ============================================================
+    # EXPANDER 3 — PRICES + CHARGING OVERLAY
+    # ============================================================
+
+    with st.expander("📉 Prices + Charging Overlay (All Scenarios)"):
+
+        def overlay_chart(prices, charging, title):
+            df = pd.DataFrame({
+                "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
+                "Price (€/kWh)": prices,
+                "Charging (kWh)": charging
+            })
+
+            price_line = alt.Chart(df).mark_line(color="orange").encode(
+                x="Datetime:T",
+                y="Price (€/kWh):Q"
+            )
+
+            charge_bars = alt.Chart(df).mark_bar(opacity=0.5, color="steelblue").encode(
+                x="Datetime:T",
+                y="Charging (kWh):Q"
+            )
+
+            return (price_line + charge_bars).properties(height=280, title=title)
+
+        st.altair_chart(
+            overlay_chart(da_96, charge_da_indexed_96, "Retail DA-indexed: Prices + Charging"),
+            use_container_width=True
+        )
+
+        st.altair_chart(
+            overlay_chart(da_96, charge_smart_da_96, "Smart DA: Prices + Charging"),
+            use_container_width=True
+        )
+
+        st.altair_chart(
+            overlay_chart(effective_da_id_96, charge_smart_full_96, "Smart DA+ID: Prices + Charging"),
+            use_container_width=True
+        )
+
+        st.markdown("""
+        **Interpretation:**
+        - Blue bars = charging amount  
+        - Orange line = price  
+        - Smart DA puts bars where orange line is lowest  
+        - Smart DA+ID uses an even more volatile price curve → should shift bars further into ID dips  
+        - If plots look identical, ID dips may be small or time window may not include them  
+        """)
 
 
     # ============================================================
