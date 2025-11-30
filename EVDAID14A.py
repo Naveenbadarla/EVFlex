@@ -219,6 +219,11 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# =============================================================================
+# EV CHARGING ANIMATION – PREMIUM E.ON STYLE
+# =============================================================================
 html_animation = """
 <style>
 
@@ -230,7 +235,6 @@ html_animation = """
     margin-bottom: 40px;
 }
 
-/* brighter card background */
 .ev-card {
     background: linear-gradient(145deg, #1e1f22 0%, #25262b 100%);
     border-radius: 24px;
@@ -241,7 +245,6 @@ html_animation = """
     border: 1px solid rgba(255,255,255,0.10);
 }
 
-/* brighter car body */
 .ev-car {
     width: 240px;
     height: 110px;
@@ -252,7 +255,6 @@ html_animation = """
     box-shadow: 0 0 30px rgba(255,0,0,0.25);
 }
 
-/* visible wheels */
 .ev-wheel {
     width: 46px;
     height: 46px;
@@ -266,7 +268,6 @@ html_animation = """
 .ev-wheel.left { left: 32px; }
 .ev-wheel.right { right: 32px; }
 
-/* bright glowing charging port */
 .ev-port {
     width: 16px;
     height: 16px;
@@ -279,7 +280,6 @@ html_animation = """
     animation: portPulse 1.6s infinite ease-in-out;
 }
 
-/* slightly visible charging cable */
 .ev-cable {
     width: 140px;
     height: 4px;
@@ -290,7 +290,6 @@ html_animation = """
     border-radius: 2px;
 }
 
-/* bright pulse dots */
 .ev-dot {
     width: 10px;
     height: 10px;
@@ -374,8 +373,6 @@ html_animation = """
 """
 
 st.markdown(html_animation, unsafe_allow_html=True)
-
-
 
 
 # =============================================================================
@@ -578,7 +575,6 @@ da_year = da_series[: num_days * 24]
 id_year = id_series[: num_days * 96]
 
 st.sidebar.info(f"Using **{num_days} days** of DA & ID price data.")
-
 
 
 # =============================================================================
