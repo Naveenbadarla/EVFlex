@@ -502,8 +502,8 @@ if page == "EV Optimizer (15-min)":
 
     # ============================================================
     # ============================================================
-# VIEW MODE: SINGLE DAY vs FULL YEAR
-# ============================================================
+    # VIEW MODE: SINGLE DAY vs FULL YEAR
+    # ============================================================
 
 mode = st.radio(
     "Simulation mode",
@@ -512,7 +512,7 @@ mode = st.radio(
 )
 
 if mode == "Single Day":
-    # COST COMPARISON TABLE
+        # COST COMPARISON TABLE
         # ============================================================
 
         results_df = pd.DataFrame([
@@ -561,7 +561,7 @@ if mode == "Single Day":
         )
 
         st.altair_chart(cost_chart, use_container_width=True)
-            # ============================================================
+        # ============================================================
         # SIMPLE CHARGING PATTERN VISUALISATION (15-min → hourly)
         # ============================================================
 
@@ -639,9 +639,9 @@ if mode == "Single Day":
             - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
             """
         )
-    # ============================================================
-    # EXPANDER 1 — DA vs ID PRICE CURVES
-    # ============================================================
+        # ============================================================
+         # EXPANDER 1 — DA vs ID PRICE CURVES
+        # ============================================================
 
     with st.expander("📈 Prices: DA vs ID (15-minute resolution)"):
 
