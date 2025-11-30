@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -71,6 +70,7 @@ def build_available_quarters(arrival_time_h, departure_time_h):
     arrival_q = int(round(arrival_time_h * 4)) % 96
     departure_q = int(round(departure_time_h * 4)) % 96
 
+    # arrival == departure -> full-day window
     if arrival_q == departure_q:
         return list(range(96)), arrival_q, departure_q
 
@@ -82,7 +82,7 @@ def build_available_quarters(arrival_time_h, departure_time_h):
     return available, arrival_q, departure_q
 
 
-# ---------- Cost calculation (15-min resolution) ----------
+# ---------- Tariffs + cost calculations ----------
 
 def apply_tariffs(price_kwh, grid_charges, taxes_levies, vat_percent):
     """
@@ -93,21 +93,25 @@ def apply_tariffs(price_kwh, grid_charges, taxes_levies, vat_percent):
     return pre_vat * (1 + vat_percent / 100)
 
 
-def compute_baseline_cost_quarter(
+def compute_da_indexed_baseline_daily(
     energy_kwh,
     max_power_kw,
     available_quarters,
     da_hourly_eur_mwh,
     grid_charges,
     taxes_levies,
-    vat_percent
+    vat_percent,
 ):
-    da_hourly_kwh = da_hourly_eur_mwh / 1000.0
+    """
+    Scenario 2: DA-indexed customer, no optimisation.
+    Baseline sequential charging from arrival, with DA prices + tariffs.
+    """
+    da_hourly_kwh = da_hourly_eur_mwh / 1000.0  # €/kWh
     da_quarter_kwh = np.repeat(da_hourly_kwh, 4)
 
     energy_remaining = energy_kwh
     total_cost = 0.0
-    max_energy_per_q = max_power_kw * 0.25
+    max_energy_per_q = max_power_kw * 0.25  # kWh per 15 min
 
     for q in available_quarters:
         if energy_remaining <= 1e-6:
@@ -119,26 +123,33 @@ def compute_baseline_cost_quarter(
         energy_remaining -= e
 
     if energy_remaining > 1e-6:
-        raise ValueError("Time window too short to deliver energy.")
+        raise ValueError("Time window too short to deliver requested energy.")
 
     return total_cost
 
 
-def compute_optimised_cost_quarter(
+def compute_optimised_daily_cost(
     energy_kwh,
     max_power_kw,
     available_quarters,
     price_quarter_eur_mwh,
     grid_charges,
     taxes_levies,
-    vat_percent
+    vat_percent,
 ):
+    """
+    For DA-optimised and DA+ID-optimised.
+    Optimises within the available quarters using the given price_quarter (€/MWh).
+    """
     price_kwh = price_quarter_eur_mwh / 1000.0
     max_energy_per_q = max_power_kw * 0.25
 
     max_deliverable = len(available_quarters) * max_energy_per_q
     if max_deliverable + 1e-6 < energy_kwh:
-        raise ValueError("Charging window too short.")
+        raise ValueError(
+            f"Charging window too short: max {max_deliverable:.1f} kWh, "
+            f"{energy_kwh:.1f} kWh requested."
+        )
 
     sorted_q = sorted(available_quarters, key=lambda q: price_kwh[q])
 
@@ -160,46 +171,73 @@ def compute_optimised_cost_quarter(
 # ---------- Streamlit UI ----------
 
 def main():
-    st.title("EV Charging Optimisation: DA Hourly + ID 15-Min with Real Tariffs")
+    st.title("EV Charging: Flat Retail vs DA vs DA-Optimised vs DA+ID-Optimised")
 
     st.write(
         """
-        This model compares EV charging costs using:
-        - **Baseline** (no optimisation, DA-only)
-        - **DA-optimised** (cheapest 15-min slots using DA price)
-        - **DA+ID-optimised** (cheapest 15-min slots using min(DA, ID))
+        This app compares **4 customer archetypes** for EV charging:
 
-        ✔ Cross-midnight supported  
-        ✔ Realistic tariff model: grid charges, taxes, VAT  
-        ✔ Flexible charging frequency  
+        1. **Flat retail price** (one fixed €/kWh, no market exposure)  
+        2. **DA-indexed** (dynamic hourly price, no optimisation)  
+        3. **DA-optimised smart charging** (cheapest 15-min slots using DA only)  
+        4. **DA+ID-optimised smart charging** (cheapest 15-min slots using min(DA, ID))  
+
+        All with the **same EV**, **same driving/charging pattern**, and **same tariffs**.
         """
     )
 
-    # ---------- EV Inputs ----------
+    # ---------- Sidebar: EV & usage ----------
     st.sidebar.header("EV & Energy Inputs")
 
-    energy_kwh = st.sidebar.number_input("Energy per session (kWh)", 1.0, 200.0, 40.0, 1.0)
-    max_power_kw = st.sidebar.number_input("Max charging power (kW)", 1.0, 50.0, 11.0, 0.5)
+    energy_kwh = st.sidebar.number_input(
+        "Energy per charging session (kWh)",
+        min_value=1.0,
+        max_value=200.0,
+        value=40.0,
+        step=1.0,
+    )
 
-    # ---------- Arrival/Departure ----------
-    st.sidebar.header("Arrival & Departure (0–24h)")
+    max_power_kw = st.sidebar.number_input(
+        "Max charging power (kW)",
+        min_value=1.0,
+        max_value=50.0,
+        value=11.0,
+        step=0.5,
+    )
 
-    arrival_time_h = st.sidebar.slider("Arrival time (h)", 0.0, 24.0, 18.0, 0.25)
-    departure_time_h = st.sidebar.slider("Departure time (h)", 0.0, 24.0, 7.0, 0.25)
+    st.sidebar.header("Arrival & Departure (0–24 h)")
 
-    # ---------- Charging Frequency ----------
+    arrival_time_h = st.sidebar.slider(
+        "Arrival time [h]",
+        min_value=0.0,
+        max_value=24.0,
+        value=18.0,
+        step=0.25,
+        help="E.g. 18.5 = 18:30",
+    )
+
+    departure_time_h = st.sidebar.slider(
+        "Departure time [h]",
+        min_value=0.0,
+        max_value=24.0,
+        value=7.0,
+        step=0.25,
+        help="Can be earlier than arrival to represent next day.",
+    )
+
+    # ---------- Sidebar: Charging frequency ----------
     st.sidebar.header("Charging Frequency")
 
     frequency_mode = st.sidebar.selectbox(
         "Charging pattern",
-        [
+        (
             "Every day",
             "Every other day",
             "Weekdays only (Mon–Fri)",
             "Weekends only (Sat–Sun)",
             "Custom weekdays",
             "Custom: X sessions per week",
-        ]
+        ),
     )
 
     custom_weekdays = []
@@ -207,85 +245,205 @@ def main():
 
     if frequency_mode == "Custom weekdays":
         custom_weekdays = st.sidebar.multiselect(
-            "Select days",
+            "Select weekdays",
             ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-            ["Mon", "Wed", "Fri"]
+            default=["Mon", "Wed", "Fri"],
         )
 
     if frequency_mode == "Custom: X sessions per week":
-        sessions_per_week = st.sidebar.number_input("Sessions per week", 1, 14, 3)
+        sessions_per_week = st.sidebar.number_input(
+            "Sessions per week",
+            min_value=1,
+            max_value=14,
+            value=3,
+            step=1,
+        )
 
     days_per_year = compute_days_per_year_from_pattern(
         frequency_mode, custom_weekdays, sessions_per_week
     )
-    st.sidebar.info(f"Estimated annual charging days: **{days_per_year}**")
+    st.sidebar.info(f"Estimated charging days per year: **{days_per_year}**")
 
-    # ---------- Tariffs ----------
-    st.sidebar.header("Tariff Components")
+    # ---------- Sidebar: Tariffs ----------
+    st.sidebar.header("Tariffs")
+
+    st.sidebar.subheader("1) Flat Retail Tariff (Scenario 1)")
+
+    flat_retail_price = st.sidebar.number_input(
+        "Flat all-in retail price (€/kWh)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.35,
+        step=0.01,
+        help="Final €/kWh paid by flat-price customer (energy + grid + taxes + VAT).",
+    )
+
+    st.sidebar.subheader("2) Dynamic DA / DA+ID Tariff Components (Scenarios 2–4)")
 
     grid_charges = st.sidebar.number_input(
-        "Grid network charges (€/kWh)", 0.0, 1.0, 0.10, 0.01,
-        help="DSO + TSO variable network fees"
+        "Grid network charges (€/kWh)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.10,
+        step=0.01,
+        help="DSO + TSO variable network fees",
     )
 
     taxes_levies = st.sidebar.number_input(
-        "Taxes & levies (€/kWh)", 0.0, 1.0, 0.05, 0.01,
-        help="Energy duty, renewable surcharges, etc."
+        "Taxes & levies (€/kWh)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.05,
+        step=0.01,
+        help="Energy duty, renewable surcharges, etc.",
     )
 
     vat_percent = st.sidebar.number_input(
-        "VAT (%)", 0.0, 30.0, 20.0, 1.0,
-        help="Applied to total energy + fees + taxes"
+        "VAT (%)",
+        min_value=0.0,
+        max_value=30.0,
+        value=20.0,
+        step=1.0,
+        help="Applied on top of energy + grid + taxes for dynamic tariffs.",
     )
 
     # ---------- Price profiles ----------
     da_hourly, id_quarter = get_synthetic_price_profiles()
-    da_quarter = np.repeat(da_hourly, 4)
+    da_quarter = np.repeat(da_hourly, 4)              # 96 values
     effective_price = np.minimum(da_quarter, id_quarter)
 
-    # ---------- Time window ----------
+    with st.expander("Show synthetic DA & ID price profiles"):
+        times_str = [f"{int(i//4):02d}:{int((i%4)*15):02d}" for i in range(96)]
+        df_prices = pd.DataFrame(
+            {
+                "DA (€/MWh)": da_quarter,
+                "ID (€/MWh)": id_quarter,
+                "Effective min(DA, ID) (€/MWh)": effective_price,
+            },
+            index=times_str,
+        )
+        df_prices.index.name = "Time"
+        st.dataframe(df_prices.style.format("{:.1f}"))
+        st.line_chart(df_prices)
+
+    # ---------- Compute costs ----------
     try:
+        # Time window (15-min slots)
         available_quarters, arrival_q, departure_q = build_available_quarters(
             arrival_time_h, departure_time_h
         )
 
-        # Daily baseline
-        baseline_daily = compute_baseline_cost_quarter(
-            energy_kwh, max_power_kw, available_quarters,
-            da_hourly, grid_charges, taxes_levies, vat_percent
+        if len(available_quarters) == 0:
+            raise ValueError("Selected charging window is empty.")
+
+        # Scenario 1: Flat retail price customer (no need for time structure)
+        flat_daily = energy_kwh * flat_retail_price
+        flat_annual = flat_daily * days_per_year
+
+        # Scenario 2: DA-indexed (baseline, no optimisation)
+        da_indexed_daily = compute_da_indexed_baseline_daily(
+            energy_kwh,
+            max_power_kw,
+            available_quarters,
+            da_hourly,
+            grid_charges,
+            taxes_levies,
+            vat_percent,
         )
+        da_indexed_annual = da_indexed_daily * days_per_year
 
-        # DA-only optimisation
-        da_optimised_daily = compute_optimised_cost_quarter(
-            energy_kwh, max_power_kw, available_quarters,
-            da_quarter, grid_charges, taxes_levies, vat_percent
+        # Scenario 3: DA-optimised (smart charging, DA only)
+        da_optimised_daily = compute_optimised_daily_cost(
+            energy_kwh,
+            max_power_kw,
+            available_quarters,
+            da_quarter,
+            grid_charges,
+            taxes_levies,
+            vat_percent,
         )
+        da_optimised_annual = da_optimised_daily * days_per_year
 
-        # DA+ID optimisation
-        da_id_optimised_daily = compute_optimised_cost_quarter(
-            energy_kwh, max_power_kw, available_quarters,
-            effective_price, grid_charges, taxes_levies, vat_percent
+        # Scenario 4: DA+ID-optimised (smart charging, DA+ID)
+        da_id_optimised_daily = compute_optimised_daily_cost(
+            energy_kwh,
+            max_power_kw,
+            available_quarters,
+            effective_price,
+            grid_charges,
+            taxes_levies,
+            vat_percent,
         )
+        da_id_optimised_annual = da_id_optimised_daily * days_per_year
 
-        # Annual totals
-        baseline_annual = baseline_daily * days_per_year
-        da_annual = da_optimised_daily * days_per_year
-        da_id_annual = da_id_optimised_daily * days_per_year
+        # ---------- Display results ----------
+        st.subheader("Annual Cost by Customer Type")
 
-        # ---------- Output ----------
-        st.subheader("Annual Cost Comparison")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Baseline (DA only)", f"{baseline_annual:,.0f} €")
-        col2.metric("DA Optimised", f"{da_annual:,.0f} €")
-        col3.metric("DA + ID Optimised", f"{da_id_annual:,.0f} €")
+        col1, col2 = st.columns(2)
+        col3, col4 = st.columns(2)
 
-        # Savings
-        st.subheader("Savings vs Baseline")
-        def pct(new, base): return 100 * (1 - new/base)
+        col1.metric("1) Flat retail (fixed €/kWh)", f"{flat_annual:,.0f} €")
+        col2.metric("2) DA-indexed (no optimisation)", f"{da_indexed_annual:,.0f} €")
+        col3.metric("3) DA-optimised (smart)", f"{da_optimised_annual:,.0f} €")
+        col4.metric("4) DA+ID-optimised (smart+)", f"{da_id_optimised_annual:,.0f} €")
 
-        c1, c2 = st.columns(2)
-        c1.metric("DA Savings", f"{baseline_annual - da_annual:,.0f} €", f"{pct(da_annual, baseline_annual):.1f}%")
-        c2.metric("DA+ID Savings", f"{baseline_annual - da_id_annual:,.0f} €", f"{pct(da_id_annual, baseline_annual):.1f}%")
+        # ---------- Savings vs flat retail ----------
+        st.markdown("---")
+        st.subheader("Savings vs Flat Retail Customer")
+
+        def savings(new_cost, ref_cost):
+            abs_s = ref_cost - new_cost
+            pct_s = 0.0 if ref_cost <= 0 else 100.0 * (1.0 - new_cost / ref_cost)
+            return abs_s, pct_s
+
+        s2_abs, s2_pct = savings(da_indexed_annual, flat_annual)
+        s3_abs, s3_pct = savings(da_optimised_annual, flat_annual)
+        s4_abs, s4_pct = savings(da_id_optimised_annual, flat_annual)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("DA-indexed vs flat", f"{s2_abs:,.0f} € / yr", f"{s2_pct:.1f} %")
+        c2.metric("DA-optimised vs flat", f"{s3_abs:,.0f} € / yr", f"{s3_pct:.1f} %")
+        c3.metric("DA+ID-optimised vs flat", f"{s4_abs:,.0f} € / yr", f"{s4_pct:.1f} %")
+
+        # ---------- Optional comparison chart ----------
+        st.markdown("---")
+        st.subheader("Cost Comparison (bar chart)")
+
+        df_bar = pd.DataFrame(
+            {
+                "Scenario": [
+                    "Flat retail",
+                    "DA-indexed",
+                    "DA-optimised",
+                    "DA+ID-optimised",
+                ],
+                "Annual cost (€)": [
+                    flat_annual,
+                    da_indexed_annual,
+                    da_optimised_annual,
+                    da_id_optimised_annual,
+                ],
+            }
+        ).set_index("Scenario")
+
+        st.bar_chart(df_bar)
+
+        # ---------- Assumptions ----------
+        st.markdown("---")
+        st.subheader("Key Assumptions")
+
+        st.write(
+            f"""
+            - Optimisation resolution: **15 minutes (96 slots/day)**  
+            - Synthetic **DA hourly** and **ID 15-min** price profiles  
+            - DA+ID effective price = **min(DA, ID)** per 15-min slot  
+            - Flat retail customer pays a **fixed all-in €/kWh** (no extra VAT in the model)  
+            - Dynamic customers (2–4) pay:  
+              **(wholesale price + grid_charges + taxes_levies) × (1 + VAT)**  
+            - Same EV, energy per session = **{energy_kwh:.1f} kWh**, max power = **{max_power_kw:.1f} kW**  
+            - Charging days per year based on your selection: **{days_per_year}**  
+            """
+        )
 
     except ValueError as e:
         st.error(str(e))
