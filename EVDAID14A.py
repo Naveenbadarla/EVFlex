@@ -223,8 +223,7 @@ st.markdown(
 
 from streamlit.components.v1 import html
 
-# Plug in actual model results here:
-BATTERY_PERCENT = 72          # <- replace with your computed % 
+# Plug in actual model results here: 
 POWER_KW = power              # <- from your sidebar
 
 html(f"""
