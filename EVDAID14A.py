@@ -609,7 +609,128 @@ if page == "EV Optimizer (15-min)":
         - Bars show how many kWh are charged in each **hour**, internally based on 15-minute optimisation.
         """
     )
-        # ============================================================
+    # ============================================================
+# EXPANDER 1 — DA vs ID PRICE CURVES
+# ============================================================
+
+with st.expander("📈 Prices: DA vs ID (15-minute resolution)"):
+
+    price_df = pd.DataFrame({
+        "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
+        "DA (€/kWh)": da_96,
+        "ID (€/kWh)": id_96
+    })
+
+    price_long = price_df.melt("Datetime", var_name="Curve", value_name="€/kWh")
+
+    price_chart = (
+        alt.Chart(price_long)
+        .mark_line(point=False)
+        .encode(
+            x="Datetime:T",
+            y="€/kWh:Q",
+            color="Curve:N",
+            tooltip=["Datetime", "Curve", alt.Tooltip("€/kWh", format=".4f")]
+        )
+        .properties(height=300)
+    )
+
+    st.altair_chart(price_chart, use_container_width=True)
+
+    st.markdown("""
+    **Interpretation:**
+    - DA curve shows base day-ahead prices.
+    - ID curve is more volatile and shows real intraday opportunities.
+    - Smart DA+ID will shift charging into low-ID dips.
+    """)
+
+    # ============================================================
+# EXPANDER 2 — Compare Charging Patterns (DA vs DA+ID)
+# ============================================================
+
+with st.expander("🔌 Charging Comparison: Smart DA vs Smart DA+ID"):
+
+    compare_df = pd.DataFrame({
+        "Hour": hours_window,
+        "Smart DA (kWh)": [smart_da_hourly[h] for h in hours_window],
+        "Smart DA+ID (kWh)": [smart_full_hourly[h] for h in hours_window],
+    })
+
+    compare_long = compare_df.melt("Hour", var_name="Scenario", value_name="kWh")
+
+    compare_chart = (
+        alt.Chart(compare_long)
+        .mark_bar()
+        .encode(
+            x="Hour:O",
+            y="kWh:Q",
+            color="Scenario:N",
+            tooltip=["Hour", "Scenario", alt.Tooltip("kWh", format=".3f")]
+        )
+        .properties(height=300)
+    )
+
+    st.altair_chart(compare_chart, use_container_width=True)
+
+    st.markdown("""
+    **Interpretation:**
+    - Smart DA charges during the cheapest DA slots.
+    - Smart DA+ID charges even more aggressively into low-ID price dips.
+    - Bars should differ if ID has meaningful dips.
+    """)
+
+    # ============================================================
+# EXPANDER 3 — PRICES + CHARGING OVERLAY
+# ============================================================
+
+with st.expander("📉 Prices + Charging Overlay (All Scenarios)"):
+
+    def overlay_chart(prices, charging, title):
+        df = pd.DataFrame({
+            "Datetime": pd.date_range("2023-01-01", periods=96, freq="15min"),
+            "Price (€/kWh)": prices,
+            "Charging (kWh)": charging
+        })
+
+        price_line = alt.Chart(df).mark_line(color="orange").encode(
+            x="Datetime:T",
+            y="Price (€/kWh):Q"
+        )
+
+        charge_bars = alt.Chart(df).mark_bar(opacity=0.5, color="steelblue").encode(
+            x="Datetime:T",
+            y="Charging (kWh):Q"
+        )
+
+        return (price_line + charge_bars).properties(height=280, title=title)
+
+    st.altair_chart(
+        overlay_chart(da_96, charge_da_indexed_96, "Retail DA-indexed: Prices + Charging"),
+        use_container_width=True
+    )
+
+    st.altair_chart(
+        overlay_chart(da_96, charge_smart_da_96, "Smart DA: Prices + Charging"),
+        use_container_width=True
+    )
+
+    st.altair_chart(
+        overlay_chart(effective_da_id_96, charge_smart_full_96, "Smart DA+ID: Prices + Charging"),
+        use_container_width=True
+    )
+
+    st.markdown("""
+    **Interpretation:**
+    - Blue bars = charging amount  
+    - Orange line = price  
+    - Smart DA puts bars where orange line is lowest  
+    - Smart DA+ID uses an even more volatile price curve → should shift bars further into ID dips  
+    - If plots look identical, ID dips may be small or time window may not include them  
+    """)
+
+
+    
+    # ============================================================
     # OPTIONAL: RANDOM ARRIVAL / SOC SIMULATION (MONTE CARLO)
     # ============================================================
 
