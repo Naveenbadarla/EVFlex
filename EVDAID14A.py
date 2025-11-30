@@ -765,7 +765,155 @@ with st.expander("📉 Prices + Charging Overlay (All Scenarios)"):
     """)
 
 
-    
+    # ============================================================
+# FULL-YEAR SIMULATION MODE (15-MIN DA/ID FOR 365 DAYS)
+# ============================================================
+
+if mode == "Full Year":
+
+    st.header("📅 Full-Year EV Smart Charging Simulation (365 days)")
+
+    # ---------- USER PARAMETERS ----------
+    battery_kwh = st.number_input("Battery size (kWh)", 20, 120, 60)
+    charger_power = st.number_input("Charger power (kW)", 2, 22, 7)
+    arrival_mean = st.slider("Average arrival hour", 0, 23, 18)
+    departure_mean = st.slider("Average departure hour", 0, 23, 7)
+    target_soc = st.slider("Target SOC (%)", 50, 100, 85) / 100
+    sessions_per_week = st.slider("Charging sessions per week", 1, 7, 4)
+    markup = st.number_input("DA markup (€/kWh)", 0.00, 0.50, 0.12)
+    retail_flat = st.number_input("Flat retail price (€/kWh)", 0.10, 1.00, 0.30)
+
+    # ---------- LOAD FULL-YEAR DATA (synthetic or uploaded) ----------
+    da_full = pd.read_csv("data/da_2023_full.csv", parse_dates=["datetime"])
+    id_full = pd.read_csv("data/id_2023_full.csv", parse_dates=["datetime"])
+
+    da_full["price"] = da_full["price_eur_mwh"] / 1000.0
+    id_full["price"] = id_full["price_eur_mwh"] / 1000.0
+
+    # Make sure both datasets cover the year
+    if len(da_full) != 35040 or len(id_full) != 35040:
+        st.error("❌ Full-year datasets must contain 35,040 rows (96×365).")
+        st.stop()
+
+    # ---------- SIMULATION LOOP ----------
+
+    results = []
+    rng = np.random.default_rng(42)
+
+    for day in range(365):
+
+        # Extract 96 quarter-hours for the day
+        da_day = da_full.iloc[day*96:(day+1)*96].copy()
+        id_day = id_full.iloc[day*96:(day+1)*96].copy()
+
+        # Decide if today is a charging day
+        if rng.random() > sessions_per_week / 7:
+            continue  # Skip today
+
+        # Arrival & departure time (randomized around mean)
+        arr = int(np.clip(rng.normal(arrival_mean, 1.5), 0, 23))
+        dep = int(np.clip(rng.normal(departure_mean, 1.5), 0, 23))
+
+        # Overnight wrap
+        arr_idx = arr * 4
+        dep_idx = dep * 4
+
+        allowed = np.zeros(96, dtype=bool)
+        if dep_idx > arr_idx:
+            allowed[arr_idx:dep_idx] = True
+        else:
+            allowed[arr_idx:] = True
+            allowed[:dep_idx] = True
+
+        # Session energy need
+        arrival_soc = rng.uniform(0.20, 0.60)
+        session_kwh = max(0, battery_kwh * (target_soc - arrival_soc))
+
+        # ---------- BASELINE (flat retail) ----------
+        remaining = session_kwh
+        base_charge = np.zeros(96)
+        idx = arr_idx
+        while remaining > 0 and idx < 96:
+            take = min(charger_power, remaining)
+            base_charge[idx] = take
+            remaining -= take
+            idx += 1
+        idx = 0
+        while remaining > 0 and idx < arr_idx:
+            take = min(charger_power, remaining)
+            base_charge[idx] = take
+            remaining -= take
+            idx += 1
+
+        base_cost = base_charge.sum() * retail_flat
+
+        # ---------- RETAIL DA-INDEXED ----------
+        da_retail = da_day["price"].values + markup
+        da_indexed_cost = (base_charge * da_retail).sum()
+
+        # ---------- SMART DA ----------
+        def optimise(prices, allowed, need_kwh):
+            sched = np.zeros(96)
+            remaining = need_kwh
+            order = np.argsort(prices)
+            for i in order:
+                if not allowed[i]:
+                    continue
+                take = min(charger_power, remaining)
+                sched[i] = take
+                remaining -= take
+                if remaining <= 0:
+                    break
+            return sched
+
+        smart_da_charge = optimise(da_retail, allowed, session_kwh)
+        smart_da_cost = (smart_da_charge * da_retail).sum()
+
+        # ---------- SMART DA+ID ----------
+        # ID discount
+        id_discount = np.clip(da_day["price"].values - id_day["price"].values, 0, None)
+        effective_da_id = da_day["price"].values - id_discount + markup
+        smart_full_charge = optimise(effective_da_id, allowed, session_kwh)
+        smart_full_cost = (smart_full_charge * effective_da_id).sum()
+
+        # ---------- STORE DAILY RESULT ----------
+        results.append({
+            "date": da_day["datetime"].iloc[0].date(),
+            "baseline": base_cost,
+            "da_indexed": da_indexed_cost,
+            "smart_da": smart_da_cost,
+            "smart_full": smart_full_cost,
+            "kwh": session_kwh,
+        })
+
+    # ---------- AGGREGATE ----------
+    df_year = pd.DataFrame(results)
+    total_kwh = df_year["kwh"].sum()
+
+    annual = {
+        "Scenario": ["Baseline (flat)", "Retail DA-indexed", "Smart DA", "Smart DA+ID"],
+        "Annual Cost (€)": [
+            df_year["baseline"].sum(),
+            df_year["da_indexed"].sum(),
+            df_year["smart_da"].sum(),
+            df_year["smart_full"].sum(),
+        ],
+        "Effective Price (€/kWh)": [
+            df_year["baseline"].sum() / total_kwh,
+            df_year["da_indexed"].sum() / total_kwh,
+            df_year["smart_da"].sum() / total_kwh,
+            df_year["smart_full"].sum() / total_kwh,
+        ]
+    }
+
+    df_annual = pd.DataFrame(annual)
+    st.subheader("📊 Annual Cost Comparison (365-day simulation)")
+    st.dataframe(df_annual)
+
+    best = df_annual.iloc[df_annual["Annual Cost (€)"].idxmin()]
+    st.success(f"Best scenario: **{best['Scenario']}** → {best['Annual Cost (€)']:.0f} € / year "
+               f"({best['Effective Price (€/kWh)']:.3f} €/kWh)")
+
     # ============================================================
     # OPTIONAL: RANDOM ARRIVAL / SOC SIMULATION (MONTE CARLO)
     # ============================================================
