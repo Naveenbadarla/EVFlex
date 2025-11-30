@@ -219,6 +219,154 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+# =============================================================================
+# EV CHARGING ANIMATION – PREMIUM E.ON STYLE
+# =============================================================================
+st.markdown("""
+<style>
+
+.ev-wrapper {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 30px;
+    margin-bottom: 30px;
+}
+
+.ev-card {
+    background: linear-gradient(145deg, #0f0f12 0%, #141418 100%);
+    border-radius: 22px;
+    padding: 35px 30px;
+    width: 95%;
+    max-width: 900px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+
+.ev-car {
+    width: 220px;
+    height: 100px;
+    border-radius: 25px;
+    background: linear-gradient(180deg, #2e2e2e, #1c1c1e 80%);
+    position: relative;
+    margin: 0 auto;
+    box-shadow: 0 0 25px rgba(255,0,0,0.18);
+}
+
+.ev-wheel {
+    width: 42px;
+    height: 42px;
+    background: #080808;
+    border-radius: 50%;
+    border: 4px solid #30363d;
+    position: absolute;
+    bottom: -18px;
+    animation: wheelGlow 4s ease-in-out infinite;
+}
+.ev-wheel.left { left: 28px; }
+.ev-wheel.right { right: 28px; }
+
+.ev-port {
+    width: 14px;
+    height: 14px;
+    background: #E2000F;
+    border-radius: 50%;
+    position: absolute;
+    right: -10px;
+    top: 34px;
+    box-shadow: 0 0 12px rgba(226,0,15,0.9);
+    animation: portPulse 1.8s infinite ease-in-out;
+}
+
+.ev-cable {
+    width: 120px;
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    position: absolute;
+    right: -120px;
+    top: 40px;
+}
+
+.ev-dot {
+    width: 8px;
+    height: 8px;
+    background: #E2000F;
+    border-radius: 50%;
+    position: absolute;
+    animation: cablePulse 2s infinite linear;
+    box-shadow: 0 0 10px rgba(226,0,15,0.7);
+}
+
+.ev-charger {
+    width: 80px;
+    height: 140px;
+    background: linear-gradient(180deg, #1d1d1f, #0f0f10);
+    border-radius: 14px;
+    position: absolute;
+    right: -220px;
+    top: -10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 0 25px rgba(255,255,255,0.08);
+}
+
+.ev-charger-screen {
+    width: 40px;
+    height: 22px;
+    background: #E2000F;
+    border-radius: 5px;
+    margin: 15px auto;
+    animation: screenGlow 2s infinite ease-in-out;
+}
+
+/* Animations */
+@keyframes wheelGlow {
+    0%,100% { box-shadow: 0 0 4px rgba(226,0,15,0.5); }
+    50% { box-shadow: 0 0 12px rgba(226,0,15,0.8); }
+}
+
+@keyframes screenGlow {
+    0%,100% { background: #E2000F; opacity: 0.7; }
+    50% { background: #ff4040; opacity: 1; }
+}
+
+@keyframes portPulse {
+    0%,100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.4); opacity: 1; }
+}
+
+@keyframes cablePulse {
+    0% { left: 0px; opacity: 1; }
+    100% { left: 110px; opacity: 0; }
+}
+
+</style>
+
+<div class="ev-wrapper">
+    <div class="ev-card">
+        <div style="position: relative; height: 160px;">
+
+            <div class="ev-car">
+                <div class="ev-wheel left"></div>
+                <div class="ev-wheel right"></div>
+                <div class="ev-port"></div>
+                <div class="ev-cable"></div>
+
+                <div class="ev-dot" style="animation-delay: 0s;"></div>
+                <div class="ev-dot" style="animation-delay: 0.4s;"></div>
+                <div class="ev-dot" style="animation-delay: 0.8s;"></div>
+
+                <div class="ev-charger">
+                    <div class="ev-charger-screen"></div>
+                </div>
+            </div>
+
+        </div>
+        <h3 style='text-align:center;margin-top:20px;color:white;font-weight:300;'>
+            Smart Charging… Optimising Your Energy Costs
+        </h3>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # =============================================================================
