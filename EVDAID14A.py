@@ -57,9 +57,9 @@ st.markdown("""
 
         /* Logo animation */
         .eon-header-logo {
-            width: 160px;
+            width: 200px;
             height: auto;
-            margin-right: 25px;
+            margin-right: 50px;
             animation: logoGlow 4s ease-in-out infinite;
         }
 
