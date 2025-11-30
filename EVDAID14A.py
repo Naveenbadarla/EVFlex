@@ -425,9 +425,28 @@ if page == "EV Optimizer (15-min)":
     # ============================================================
 
     # Baseline (flat retail price)
-    charge_baseline_96 = optimise_charging_96(
-        baseline_curve_96, allowed_96, session_kwh, charger_power
-    )
+    # --- Baseline charging: fill from arrival index forward ---
+charge_baseline_96 = np.zeros(96)
+remaining = session_kwh
+
+# iterate forward starting at arrival index
+start = arrival_hour * 4
+idx = start
+
+while remaining > 0 and idx < 96:
+    take = min(charger_power, remaining)
+    charge_baseline_96[idx] = take
+    remaining -= take
+    idx += 1
+
+# if still energy left, continue after midnight (wrap-around)
+idx = 0
+while remaining > 0 and idx < start:
+    take = min(charger_power, remaining)
+    charge_baseline_96[idx] = take
+    remaining -= take
+    idx += 1
+
 
     # Retail DA-indexed (no smart shifting → same pattern as baseline)
     charge_da_indexed_96 = charge_baseline_96.copy()
