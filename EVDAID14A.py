@@ -87,38 +87,55 @@ def synthetic_da_id_profiles_96():
 
 def get_da_id_profiles_96(price_source, year, da_file, id_file):
     """Return (da_96, id_96) based on user selection."""
+
+    # -------------------------------------------------------
+    # 1. SYNTHETIC EXAMPLE
+    # -------------------------------------------------------
     if price_source == "Synthetic example":
-    return synthetic_da_id_profiles_96()
+        return synthetic_da_id_profiles_96()
 
+    # -------------------------------------------------------
+    # 2. BUILT-IN HISTORICAL (data/*.csv)
+    # -------------------------------------------------------
     if price_source == "Built-in historical (data/…csv)":
-    da_path = DATA_DIR / f"da_{year}.csv"
-    id_path = DATA_DIR / f"id_{year}.csv"
+        da_path = DATA_DIR / f"da_{year}.csv"
+        id_path = DATA_DIR / f"id_{year}.csv"
 
-    if not da_path.exists() or not id_path.exists():
-        st.warning("Missing DA/ID files → using synthetic prices.")
+        if not da_path.exists() or not id_path.exists():
+            st.warning("Missing DA/ID files → using synthetic fallback.")
+            return synthetic_da_id_profiles_96()
+
+        da_series = load_price_15min(da_path)
+        id_series = load_price_15min(id_path)
+
+        # Convert €/MWh → €/kWh
+        da_96 = series_to_96_slots(da_series) / 1000.0
+        id_96 = series_to_96_slots(id_series) / 1000.0
+        return da_96, id_96
+
+    # -------------------------------------------------------
+    # 3. UPLOAD RAW DA+ID CSVs
+    # -------------------------------------------------------
+    if price_source == "Upload DA+ID CSVs":
+        if da_file is None or id_file is None:
+            st.warning("Please upload both DA and ID price files.")
+            return synthetic_da_id_profiles_96()
+
+        da_series = load_price_15min(da_file)
+        id_series = load_price_15min(id_file)
+
+        # Convert €/MWh → €/kWh
+        da_96 = series_to_96_slots(da_series) / 1000.0
+        id_96 = series_to_96_slots(id_series) / 1000.0
+        return da_96, id_96
+
+    # -------------------------------------------------------
+    # FALLBACK (should not be reached)
+    # -------------------------------------------------------
     return synthetic_da_id_profiles_96()
 
-    da_series = load_price_15min(da_path)
-    id_series = load_price_15min(id_path)
 
-    da_96 = series_to_96_slots(da_series) / 1000.0   # MWh → kWh
-    id_96 = series_to_96_slots(id_series) / 1000.0
-    return da_96, id_96
-
-
-if price_source == "Upload DA+ID CSVs":
-    if da_file is None or id_file is None:
-        st.warning("Please upload both DA & ID files or use another source.")
-    return synthetic_da_id_profiles_96()
-
-    da_series = load_price_15min(da_file)
-    id_series = load_price_15min(id_file)
-
-    da_96 = series_to_96_slots(da_series) / 1000.0   # MWh → kWh
-    id_96 = series_to_96_slots(id_series) / 1000.0
-    return da_96, id_96
-
-    # ============================================================
+# ============================================================
 # EV OPTIMISATION UTILITIES (15-MIN / 96 SLOTS)
 # ============================================================
 
