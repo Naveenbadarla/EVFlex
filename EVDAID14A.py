@@ -16,51 +16,51 @@ DATA_DIR.mkdir(exist_ok=True)
 # PRICE UTILITIES (15-MIN RESOLUTION)
 # ============================================================
 
-def load_price_15min(source) -> pd.Series:
+def load_price_15min(filepath):
     """
-    Load a raw CSV: detect datetime + price columns; convert €/MWh → €/kWh;
-    return a cleaned 15-minute price series indexed by datetime.
+    Robust loader for cleaned 15-min files created by Price Manager 2.0.
+    Accepts any column naming pattern as long as it contains:
+        - datetime column
+        - price column
     """
-    df = pd.read_csv(source)
+
+    df = pd.read_csv(filepath)
+
+    # Normalize column names
+    df.columns = [c.strip().lower() for c in df.columns]
 
     # Detect datetime column
-    dt_col = None
-    for c in df.columns:
-        if ("MTU" in c) or ("date" in c.lower()) or ("time" in c.lower()):
-            dt_col = c
-            break
-    if dt_col is None:
+    dt_candidates = [
+        c for c in df.columns
+        if any(k in c for k in ["datetime", "date", "time"])
+    ]
+
+    if not dt_candidates:
         raise ValueError("No datetime column found in uploaded file.")
 
-    # Detect price column (€/MWh)
-    price_col = None
-    for c in df.columns:
-        if ("price" in c.lower()) or ("MWh" in c):
-            price_col = c
-            break
-    if price_col is None:
-        raise ValueError("No price column found.")
+    dt_col = dt_candidates[0]
 
-    # Clean datetime
-    try:
-        dt_clean = df[dt_col].astype(str).str.split("-").str[0].str.strip()
-        df["datetime"] = pd.to_datetime(dt_clean)
-    except:
-        df["datetime"] = pd.to_datetime(df[dt_col], errors="coerce")
+    # Parse datetimes
+    df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce")
+    df = df.dropna(subset=[dt_col])
 
-    # Convert €/MWh → €/kWh
-    df["price_eur_mwh"] = pd.to_numeric(df[price_col], errors="coerce")
-    df = df.dropna(subset=["datetime", "price_eur_mwh"])
-    df["price_eur_kwh"] = df["price_eur_mwh"] / 1000.0
+    # Detect price column
+    price_candidates = [c for c in df.columns if "price" in c]
 
-    # Resample to EXACT 15-minute resolution
-    s15 = (
-        df.set_index("datetime")["price_eur_kwh"]
-        .resample("15min")
-        .mean()
-    ).dropna()
+    if not price_candidates:
+        raise ValueError("No price column found in cleaned file.")
 
-    return s15
+    price_col = price_candidates[0]
+
+    # Build cleaned series
+    s = (
+        df.set_index(dt_col)[price_col]
+        .astype(float)
+        .sort_index()
+    )
+
+    return s
+
 
 
 def series_to_96_slots(series_15min: pd.Series) -> np.ndarray:
