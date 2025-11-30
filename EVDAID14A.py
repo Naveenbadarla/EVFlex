@@ -3,6 +3,154 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import datetime
+# ---------------------- FULL E.ON THEME STYLING ---------------------------
+
+eon_logo = "https://upload.wikimedia.org/wikipedia/commons/1/17/E.ON_Logo_2021.png"
+
+st.markdown(
+    f"""
+    <style>
+        /* Global font + reset */
+        html, body, [class*="css"]  {{
+            font-family: "Source Sans Pro", sans-serif;
+        }}
+
+        /* -------------------------- HEADER BAR -------------------------- */
+        .eon-header {{
+            background-color: #E2000F;
+            padding: 25px 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            color: white;
+        }}
+
+        .eon-header img {{
+            height: 60px;
+            margin-right: 22px;
+        }}
+
+        .eon-title {{
+            font-size: 34px;
+            font-weight: 700;
+            margin: 0;
+        }}
+
+        .eon-subtitle {{
+            font-size: 18px;
+            font-weight: 300;
+            color: #FFEAEA;
+            margin-top: 4px;
+        }}
+
+        /* Mobile responsiveness */
+        @media (max-width: 600px) {{
+            .eon-header {{
+                flex-direction: column;
+                text-align: center;
+            }}
+
+            .eon-header img {{
+                margin-bottom: 12px;
+            }}
+        }}
+
+        /* -------------------------- SIDEBAR -------------------------- */
+        section[data-testid="stSidebar"] {{
+            background-color: #FDECEC !important;
+        }}
+
+        section[data-testid="stSidebar"] .css-1d391kg {{
+            background-color: #FDECEC;
+        }}
+
+        /* Sidebar title text */
+        .css-1d391kg h1, .css-1d391kg h2, .css-1d391kg h3 {{
+            color: #E2000F !important;
+        }}
+
+        /* Sidebar labels */
+        .css-1cpxqw2, .css-1p4jv9z, label {{
+            color: #B00000 !important;
+            font-weight: 600 !important;
+        }}
+
+        /* -------------------------- BUTTONS -------------------------- */
+        .stButton button {{
+            background-color: #E2000F;
+            color: white;
+            border-radius: 6px;
+            padding: 8px 18px;
+            border: none;
+            font-weight: 600;
+            height: 40px;
+        }}
+
+        .stButton button:hover {{
+            background-color: #C40000;
+            color: white;
+        }}
+
+        /* -------------------------- SLIDERS -------------------------- */
+        .stSlider > div {{
+            background-color: #E2000F20;
+            border-radius: 8px;
+            padding: 8px;
+        }}
+
+        .stSlider .css-1aumxhk, .stSlider .css-1ptx7rd {{
+            color: #E2000F !important;
+        }}
+
+        div[data-baseweb="slider"] > div > div {{
+            background-color: #E2000F !important; /* slider color */
+        }}
+
+        /* -------------------------- NUMERIC INPUTS -------------------------- */
+        input[type="number"], input[type="text"] {{
+            border: 1.5px solid #E2000F50 !important;
+            border-radius: 5px !important;
+        }}
+
+        /* -------------------------- SELECTBOX -------------------------- */
+        .stSelectbox div[data-baseweb="select"] > div {{
+            border: 1.5px solid #E2000F50 !important;
+            border-radius: 5px !important;
+        }}
+
+        /* -------------------------- CARDS -------------------------- */
+        .eon-card {{
+            padding: 20px;
+            margin-top: 15px;
+            background-color: white;
+            border-radius: 10px;
+            border-left: 5px solid #E2000F;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        }}
+
+        /* -------------------------- FOOTER -------------------------- */
+        .eon-footer {{
+            margin-top: 50px;
+            text-align: center;
+            color: #888;
+            font-size: 14px;
+            padding: 15px;
+            border-top: 1px solid #EEE;
+        }}
+    </style>
+
+    <div class="eon-header">
+        <img src="{eon_logo}">
+        <div>
+            <div class="eon-title">EV Charging Optimisation Dashboard</div>
+            <div class="eon-subtitle">Full-Year Market Simulation · DA · ID · Smart Charging</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =====================================================================================
